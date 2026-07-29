@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -38,17 +39,35 @@ class ForwardOutcome:
     source: str = ""
     attempted_sources: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
+    warnings: dict[str, str] = field(default_factory=dict)
     message_sent: bool = False
+    send_attempted: bool = False
+    delivery_uncertain: bool = False
     review_fallback: bool = False
     pixiv_ids: list[int] = field(default_factory=list)
+    pixiv_found_count: int = 0
 
     def to_json(self) -> str:
         payload = asdict(self)
-        payload["instruction"] = (
-            "图片已发送，请简短说明使用的来源；不要虚构图片内容。"
-            if self.success and self.message_sent
-            else "请根据 errors 向用户说明失败原因，并建议调整关键词或配置。"
-        )
+        if self.success and self.message_sent:
+            instruction = "图片已发送，请简短说明使用的来源；不要虚构图片内容。"
+        elif self.success and self.delivery_uncertain:
+            instruction = (
+                "图片来源已找到并已尝试发送，但平台发送确认超时或失败；"
+                "请简短告知用户发送状态不确定，不要切换其它图源，也不要虚构图片内容。"
+            )
+        elif self.success and self.send_attempted:
+            instruction = (
+                "图片来源已找到并已尝试发送；请简短说明使用的来源，不要虚构图片内容。"
+            )
+        elif self.success:
+            instruction = (
+                "图片来源已找到，但当前配置不自动发送图片；"
+                "请简短说明使用的来源和可用结果，不要虚构图片内容。"
+            )
+        else:
+            instruction = "请根据 errors 向用户说明失败原因，并建议调整关键词或配置。"
+        payload["instruction"] = instruction
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -64,6 +83,7 @@ class ForwardSearchOrchestrator:
         self.pixiv = pixiv
         self.soutu = soutu
         self.serpapi = serpapi
+        self._background_send_tasks: set[asyncio.Task[None]] = set()
 
     def _source_config(self, source: str) -> dict[str, Any]:
         value = self.config.get(source, {})
@@ -121,12 +141,95 @@ class ForwardSearchOrchestrator:
         return [source for source in dict.fromkeys(order) if self._available(source)]
 
     async def close(self) -> None:
+        for task in list(self._background_send_tasks):
+            task.cancel()
+        if self._background_send_tasks:
+            await asyncio.gather(
+                *self._background_send_tasks,
+                return_exceptions=True,
+            )
+            self._background_send_tasks.clear()
         if self.pixiv:
             await self.pixiv.close()
         if self.soutu:
             await self.soutu.terminate()
         if self.serpapi:
             await self.serpapi.close()
+
+    def _send_wait_timeout_seconds(self) -> float:
+        raw = self.config.get("tool_send_wait_timeout_seconds", 45)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 45
+        return max(0, min(value, 600))
+
+    def _track_background_send(
+        self,
+        source: str,
+        task: asyncio.Task[None],
+    ) -> None:
+        self._background_send_tasks.add(task)
+
+        def _done(done_task: asyncio.Task[None]) -> None:
+            self._background_send_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                done_task.result()
+                logger.info("[AliceImageForward] 来源 %s 后台发送任务已完成。", source)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[AliceImageForward] 来源 %s 后台发送任务最终失败: %s",
+                    source,
+                    exc,
+                )
+
+        task.add_done_callback(_done)
+
+    async def _send_with_wait_limit(
+        self,
+        event: AstrMessageEvent,
+        result: Any,
+        source: str,
+        timeout_seconds: float,
+    ) -> tuple[bool, str]:
+        if timeout_seconds <= 0:
+            await event.send(result)
+            return True, ""
+
+        task = asyncio.create_task(event.send(result))
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout_seconds)
+            return True, ""
+        except TimeoutError:
+            self._track_background_send(source, task)
+            return (
+                False,
+                f"发送等待超过 {timeout_seconds:g} 秒，已转入后台继续等待平台确认",
+            )
+
+    async def _send_image_bytes(
+        self,
+        event: AstrMessageEvent,
+        source: str,
+        image_bytes: bytes,
+        timeout_seconds: float,
+    ) -> tuple[bool, str]:
+        try:
+            return await self._send_with_wait_limit(
+                event,
+                event.chain_result([Comp.Image.fromBytes(image_bytes)]),
+                source,
+                timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[AliceImageForward] 来源 %s 已找到图片但发送失败: %s",
+                source,
+                exc,
+            )
+            return False, str(exc)
 
     async def search(
         self,
@@ -156,6 +259,9 @@ class ForwardSearchOrchestrator:
             review_enabled = False
         review_fail_open = bool(review_cfg.get("fail_open", True))
         send_images = bool(self.config.get("tool_send_images", True)) or for_command
+        send_wait_timeout_seconds = (
+            0 if for_command else self._send_wait_timeout_seconds()
+        )
 
         sources = self.choose_sources(query, source)
         if not sources:
@@ -173,13 +279,25 @@ class ForwardSearchOrchestrator:
                         count=count,
                         review_enabled=review_enabled,
                         send_images=send_images,
+                        send_wait_timeout_seconds=send_wait_timeout_seconds,
                     )
                     if result.success:
                         outcome.success = True
                         outcome.source = current
                         outcome.message_sent = result.sent_count > 0
+                        outcome.send_attempted = bool(
+                            getattr(result, "send_attempted", result.sent_count > 0)
+                        )
+                        outcome.delivery_uncertain = bool(
+                            getattr(result, "delivery_uncertain", False)
+                        )
                         outcome.review_fallback = result.review_fallback
                         outcome.pixiv_ids = result.ids
+                        outcome.pixiv_found_count = int(
+                            getattr(result, "found_count", len(result.ids))
+                        )
+                        if result.error:
+                            outcome.warnings[current] = result.error
                         return outcome
                     outcome.errors[current] = result.error or "Pixiv 找图失败。"
 
@@ -201,14 +319,24 @@ class ForwardSearchOrchestrator:
                             )
                         else:
                             if send_images:
-                                await event.send(
-                                    event.chain_result(
-                                        [Comp.Image.fromBytes(image_bytes)]
-                                    )
+                                sent, send_error = await self._send_image_bytes(
+                                    event,
+                                    current,
+                                    image_bytes,
+                                    send_wait_timeout_seconds,
                                 )
+                            else:
+                                sent, send_error = False, ""
                             outcome.success = True
                             outcome.source = current
-                            outcome.message_sent = send_images
+                            outcome.message_sent = sent
+                            outcome.send_attempted = send_images
+                            outcome.delivery_uncertain = send_images and not sent
+                            if send_error:
+                                outcome.warnings[current] = (
+                                    "来源已找到图片，但平台发送确认超时或失败；不会切换其它图源。"
+                                    f"最后一次发送错误：{send_error}"
+                                )
                             outcome.review_fallback = review_fallback
                             return outcome
                     if not image_bytes:
@@ -232,14 +360,24 @@ class ForwardSearchOrchestrator:
                             )
                         else:
                             if send_images:
-                                await event.send(
-                                    event.chain_result(
-                                        [Comp.Image.fromBytes(result.image_bytes)]
-                                    )
+                                sent, send_error = await self._send_image_bytes(
+                                    event,
+                                    current,
+                                    result.image_bytes,
+                                    send_wait_timeout_seconds,
                                 )
+                            else:
+                                sent, send_error = False, ""
                             outcome.success = True
                             outcome.source = current
-                            outcome.message_sent = send_images
+                            outcome.message_sent = sent
+                            outcome.send_attempted = send_images
+                            outcome.delivery_uncertain = send_images and not sent
+                            if send_error:
+                                outcome.warnings[current] = (
+                                    "来源已找到图片，但平台发送确认超时或失败；不会切换其它图源。"
+                                    f"最后一次发送错误：{send_error}"
+                                )
                             outcome.review_fallback = result.review_fallback
                             return outcome
                     if not result.image_bytes:

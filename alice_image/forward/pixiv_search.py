@@ -32,7 +32,10 @@ class PixivForwardResult:
     success: bool = False
     error: str = ""
     ids: list[int] = field(default_factory=list)
+    found_count: int = 0
     sent_count: int = 0
+    send_attempted: bool = False
+    delivery_uncertain: bool = False
     review_fallback: bool = False
 
 
@@ -50,6 +53,7 @@ class PixivForwardSearchService:
         self._review_lock = asyncio.Semaphore(
             self._bounded_int("max_concurrency", 2, 1, 8)
         )
+        self._background_send_tasks: set[asyncio.Task[None]] = set()
 
     def _bounded_int(self, key: str, default: int, minimum: int, maximum: int) -> int:
         try:
@@ -59,7 +63,57 @@ class PixivForwardSearchService:
         return max(minimum, min(maximum, value))
 
     async def close(self) -> None:
+        for task in list(self._background_send_tasks):
+            task.cancel()
+        if self._background_send_tasks:
+            await asyncio.gather(
+                *self._background_send_tasks,
+                return_exceptions=True,
+            )
+            self._background_send_tasks.clear()
         await self._collage.close_all()
+
+    def _track_background_send(self, task: asyncio.Task[None]) -> None:
+        self._background_send_tasks.add(task)
+
+        def _done(done_task: asyncio.Task[None]) -> None:
+            self._background_send_tasks.discard(done_task)
+            if done_task.cancelled():
+                return
+            try:
+                done_task.result()
+                logger.info("[AliceImagePixiv] 后台发送任务已完成。")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[AliceImagePixiv] 后台发送任务最终失败: %s", exc)
+
+        task.add_done_callback(_done)
+
+    async def _send_with_wait_limit(
+        self,
+        event: AstrMessageEvent,
+        result: Any,
+        timeout_seconds: float,
+    ) -> tuple[bool, bool, str]:
+        if timeout_seconds <= 0:
+            try:
+                await event.send(result)
+                return True, False, ""
+            except Exception as exc:  # noqa: BLE001
+                return False, True, str(exc)
+
+        task = asyncio.create_task(event.send(result))
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout_seconds)
+            return True, False, ""
+        except TimeoutError:
+            self._track_background_send(task)
+            return (
+                False,
+                True,
+                f"发送等待超过 {timeout_seconds:g} 秒，已转入后台继续等待平台确认",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return False, True, str(exc)
 
     async def _provider(self, event: AstrMessageEvent):
         provider_id = str(self.review_config.get("provider_id") or "").strip()
@@ -232,6 +286,7 @@ class PixivForwardSearchService:
         count: int = 1,
         review_enabled: bool = True,
         send_images: bool = True,
+        send_wait_timeout_seconds: float = 0,
     ) -> PixivForwardResult:
         if not await self.controller.client_wrapper.authenticate():
             return PixivForwardResult(
@@ -263,7 +318,9 @@ class PixivForwardSearchService:
             return PixivForwardResult(
                 success=True,
                 ids=ids,
+                found_count=len(selected),
                 sent_count=0,
+                send_attempted=False,
                 review_fallback=review_fallback,
             )
 
@@ -286,6 +343,9 @@ class PixivForwardSearchService:
             show_details=cfg.show_details,
         )
         sent = 0
+        send_attempted = False
+        delivery_uncertain = False
+        last_send_error = ""
         async for result in process_and_send_illusts_sorted(
             selected,
             send_cfg,
@@ -296,16 +356,36 @@ class PixivForwardSearchService:
             send_forward_message,
             is_novel=False,
         ):
-            try:
-                await event.send(result)
+            send_attempted = True
+            sent_ok, uncertain, send_error = await self._send_with_wait_limit(
+                event,
+                result,
+                send_wait_timeout_seconds,
+            )
+            if sent_ok:
                 sent += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[AliceImagePixiv] 发送候选失败: %s", exc)
+            else:
+                delivery_uncertain = True
+                if uncertain:
+                    last_send_error = send_error
+                logger.warning("[AliceImagePixiv] 发送候选失败: %s", send_error)
+
+        if sent > 0:
+            error = ""
+        elif send_attempted:
+            error = "Pixiv 已找到作品并尝试发送，但平台发送确认超时或失败；不会切换其它图源。"
+            if last_send_error:
+                error = f"{error}最后一次发送错误：{last_send_error}"
+        else:
+            error = "Pixiv 已找到作品，但没有生成可发送的消息；不会切换其它图源。"
 
         return PixivForwardResult(
-            success=sent > 0,
-            error="" if sent > 0 else "找到 Pixiv 作品但发送失败。",
+            success=bool(selected),
+            error=error,
             ids=ids,
+            found_count=len(selected),
             sent_count=sent,
+            send_attempted=send_attempted,
+            delivery_uncertain=delivery_uncertain,
             review_fallback=review_fallback,
         )

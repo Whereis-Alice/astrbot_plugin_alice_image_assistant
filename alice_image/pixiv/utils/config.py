@@ -119,7 +119,7 @@ class PixivConfig:
             )
         else:
             self.image_send_method = "url"
-        self.image_quality = self.config.get("image_quality", "original")
+        self.image_quality = self.config.get("image_quality", "medium")
         # 本地 PIL 压缩：仅在 image_send_method 为 file/byte 时生效
         self.pil_compress_quality = self.config.get("pil_compress_quality", 100)
         self.pil_compress_target_kb = self.config.get("pil_compress_target_kb", 0)

@@ -28,7 +28,7 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.0.1"
+PLUGIN_VERSION = "1.0.2"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 
 
@@ -208,7 +208,12 @@ class AliceImageAssistantPlugin(Star):
             for_command=True,
         )
         if outcome.success:
-            note = "；视觉审核已回退到首选结果" if outcome.review_fallback else ""
+            notes = []
+            if outcome.review_fallback:
+                notes.append("视觉审核已回退到首选结果")
+            if outcome.delivery_uncertain:
+                notes.append("平台发送确认超时或失败，已停止切换其它图源")
+            note = f"；{'；'.join(notes)}" if notes else ""
             yield event.plain_result(f"找图完成，来源：{outcome.source}{note}。")
         else:
             details = "；".join(

@@ -43,6 +43,13 @@
         "hint": "关闭后工具只返回结果信息；指令仍会发图。",
         "default": true
       },
+      "tool_send_wait_timeout_seconds": {
+        "type": "int",
+        "description": "LLM 工具等待平台发送确认的秒数",
+        "hint": "超过后工具先返回，图片发送留在后台继续；设为 0 表示一直等待平台发送结束。",
+        "default": 45,
+        "slider": {"min": 0, "max": 180, "step": 5}
+      },
       "auto_source_enabled": {
         "type": "bool",
         "description": "允许 auto 根据内容自动选源",

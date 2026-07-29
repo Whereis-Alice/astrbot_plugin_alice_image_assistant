@@ -6,6 +6,9 @@ import unittest
 from pathlib import Path
 
 from astrbot_plugin_alice_image_assistant.alice_image.config import NestedConfigProxy
+from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.config import (
+    PixivConfig,
+)
 from astrbot_plugin_alice_image_assistant.alice_image.tools import (
     AliceFindImageTool,
     AlicePixivNovelTool,
@@ -48,6 +51,15 @@ class ConfigAndToolTests(unittest.TestCase):
         proxy.save_config()
         self.assertEqual(root["find_image"]["pixiv"]["settings"]["return_count"], 3)
         self.assertEqual(root.saved, 1)
+
+    def test_pixiv_runtime_quality_default_matches_schema(self) -> None:
+        schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
+        schema_default = schema["find_image"]["items"]["pixiv"]["items"]["settings"][
+            "items"
+        ]["image_quality"]["default"]
+
+        self.assertEqual(schema_default, "medium")
+        self.assertEqual(PixivConfig({}).image_quality, schema_default)
 
     def test_llm_tool_names_and_schemas_are_unique(self) -> None:
         tools = [
