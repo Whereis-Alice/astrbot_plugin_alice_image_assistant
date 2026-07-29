@@ -132,12 +132,86 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 
 ## 凭据获取
 
-| 服务 | 用途 | 凭据 |
-|---|---|---|
-| Pixiv | 插画、小说、排行榜、订阅等 | `refresh_token`，见 [pixivpy3](https://pypi.org/project/pixivpy3/) 文档 |
-| SerpApi | Google Images 文字搜图、Google Lens 反搜 | [SerpApi](https://serpapi.com) API Key |
-| SauceNAO | 二次元作品溯源 | [SauceNAO API](https://saucenao.com/user.php?page=search-api) Key |
-| Ascii2d | 二次元反搜 | 浏览器中的 `_session_id`，必要时加 `cf_clearance` |
+不需要一次性填完所有凭据：只启用某个来源时，才需要配置对应的 Key、Token 或 Cookie。下面步骤参考了 [astrbot_plugin_imgexploration](https://github.com/iona-s/astrbot_plugin_imgexploration) 的说明，并结合本插件的配置项整理。
+
+### Pixiv Refresh Token
+
+用途：Pixiv 插画、小说、排行榜、推荐、画师、订阅和 Pixiv 精确找图。
+
+填写位置：`find_image.pixiv.settings.refresh_token`
+
+获取方法：
+
+1. 登录自己的 Pixiv 账号。
+2. 按 [pixivpy3](https://pypi.org/project/pixivpy3/) 文档或常用的 Pixiv OAuth 获取工具，在本机登录并换取 `refresh_token`。
+3. 把得到的 `refresh_token` 填入插件配置，然后重载插件。
+
+注意：请填写 `refresh_token`，不是短期 `access_token`。如果日志提示 `invalid_grant` 或鉴权失败，通常需要重新获取。
+
+### SerpApi API Key
+
+用途：SerpApi Google Images 文字搜图，以及 Google Lens 以图搜图。
+
+填写位置：
+
+- `find_image.serpapi.serpapi_keys`
+- `reverse_image.api_keys.serpapi_keys`
+
+获取方法：
+
+1. 打开 [SerpApi](https://serpapi.com/) 并注册或登录账号。
+2. 进入账号 Dashboard / API Key 页面。
+3. 复制 API Key，填入上面的 `serpapi_keys` 列表；多个 Key 可以分多项填写，插件会轮询使用。
+
+提示：两个模块会互相复用 SerpApi Key。如果只在找图模块或以图搜图模块填了一处，另一处为空时插件会自动复用已填写的 Key。
+
+### SauceNAO API Key
+
+用途：二次元图片、Pixiv、Danbooru 等来源的以图搜图。
+
+填写位置：`reverse_image.api_keys.saucenao_api_key`
+
+获取方法：
+
+1. 打开 [SauceNAO API 页面](https://saucenao.com/user.php?page=search-api)。
+2. 注册或登录 SauceNAO 账号。
+3. 复制页面中的 API Key，填入插件配置。
+
+提示：免费额度和调用限制可能调整，请以 SauceNAO 页面显示为准。
+
+### Ascii2d Cookie
+
+用途：Ascii2d 以图搜图。
+
+填写位置：
+
+- `reverse_image.api_keys.ascii2d_session_id`
+- `reverse_image.api_keys.ascii2d_cf_clearance`
+
+获取方法：
+
+1. 用 Chrome 或 Edge 打开 [Ascii2d](https://ascii2d.net/)。
+2. 上传任意图片并完成一次搜索；如果出现 Cloudflare 验证，先正常通过验证。
+3. 按 `F12` 打开开发者工具，进入 `Application` -> `Cookies` -> `https://ascii2d.net`。
+4. 找到 `_session_id`，复制它的 `Value`，填入 `ascii2d_session_id`。
+5. 如果页面里有 `cf_clearance`，也复制它的 `Value`，填入 `ascii2d_cf_clearance`。
+
+提示：Cookie 会过期。遇到 Ascii2d 403、验证失败或长期无结果时，重新按上面步骤获取即可。
+
+### Fanbox Cookie
+
+用途：访问需要登录态或受限的 Fanbox 帖子内容。普通 Pixiv 插画搜索不需要它。
+
+填写位置：`find_image.pixiv.settings.fanbox_cookie`
+
+获取方法：
+
+1. 用浏览器登录 [pixivFANBOX](https://www.fanbox.cc/)。
+2. 打开开发者工具，进入 `Application` -> `Cookies`，选择 `fanbox.cc` 或具体创作者的 `*.fanbox.cc` 域。
+3. 复制完整 Cookie 字符串，建议至少包含 `FANBOXSESSID`；如果有 Cloudflare 验证，连同 `cf_clearance` 一起保留。
+4. 填入 `fanbox_cookie`，并尽量让 `fanbox_user_agent` 与获取 Cookie 时的浏览器一致。
+
+请把这些凭据当作账号密码处理，不要发到群聊、公开 Issue、截图或提交记录里。
 
 ## 隐私与内容提示
 
