@@ -1,5 +1,10 @@
 # 更新日志
 
+## v1.0.4 - 2026-07-29
+
+- 扩展 Pixiv 作品链接自动解析：链接可以夹在普通文字中，并兼容 `/en/artworks/` 等语言路径、查询参数、片段、末尾标点、移动端域名、无协议链接和旧版 `member_illust.php` 链接。
+- 一条消息包含多个作品链接时只处理第一条有效链接，避免自动解析连续刷图；原有 `url_lookup` 与 `pixiv_urlsearch_enabled` 开关保持不变。
+
 ## v1.0.3 - 2026-07-29
 
 - `alice_image_find` 新增可选参数 `artist_name` 和 `pixiv_user_id`。填写后会限定在指定 Pixiv 画师作品中找图；未填写时普通找图流程不变。

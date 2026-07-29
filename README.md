@@ -56,6 +56,7 @@ python -m playwright install chromium
 ### Pixiv
 
 所有 Pixiv 原命令均改为独立短命令，避免与原插件的 `/pixiv*` 冲突。
+开启作品链接自动解析后，直接发送或在文字中附上 Pixiv 作品链接即可取图；兼容语言路径和旧版作品链接。
 
 | 指令 | 用途 |
 |---|---|

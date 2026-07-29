@@ -13,6 +13,7 @@ from ..utils.tag import (
 from ..utils.pixiv_utils import send_pixiv_image, send_forward_message
 
 from ..utils.help import get_help_message
+from ..utils.url import extract_pixiv_artwork_id
 
 
 class IllustHandler:
@@ -28,27 +29,21 @@ class IllustHandler:
         self.pixiv_config = pixiv_config
 
     async def pixiv_msg_url(self, event: AstrMessageEvent, msg: str = ""):
-        """处理接受的消息，查看是否为 https://www.pixiv.net/artworks/xxxx 形式的 URL，并获取作品信息"""
-        # 检查是否启用了 Pixiv URL 搜索功能
+        """识别消息中的 Pixiv 作品链接并发送对应作品。"""
         if not self.pixiv_config.pixiv_urlsearch_enabled:
             return
-        msg = event.message_str.strip()  # 去除首尾空白字符
-        # 检查是否为 Pixiv 插画 URL
-        if msg.startswith("https://www.pixiv.net/artworks/"):
-            try:
-                # 获取作品ID，使用 rstrip("/") 避免末尾斜杠导致取到空字符串
-                illust_id = msg.rstrip("/").split("/")[-1]
-                # 简单验证 ID 是否为数字，防止类似 /artworks/abc 的无效输入
-                if not illust_id.isdigit():
-                    yield event.plain_result("无效的 Pixiv 插画 ID。")
-                    return
 
-                # 调用已有的 pixiv_specific 方法获取作品信息并发送
-                async for result in self.pixiv_specific(event, illust_id):
-                    yield result
-            except Exception as e:
-                logger.error(f"获取插画信息失败: {e}")
-                yield event.plain_result("获取插画信息失败，请稍后再试。")
+        message = msg or getattr(event, "message_str", "")
+        illust_id = extract_pixiv_artwork_id(message)
+        if not illust_id:
+            return
+
+        try:
+            async for result in self.pixiv_specific(event, illust_id):
+                yield result
+        except Exception as e:
+            logger.error(f"获取插画信息失败: {e}")
+            yield event.plain_result("获取插画信息失败，请稍后再试。")
 
     async def pixiv_search_illust(self, event: AstrMessageEvent, tags: str = ""):
         """处理 /pixiv 命令，默认为标签搜索功能"""
