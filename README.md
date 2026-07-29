@@ -112,7 +112,7 @@ python -m playwright install chromium
 ### 找图模块
 
 - `enabled`、`commands_enabled`、`llm_tools_enabled`：分别控制整个模块、所有指令和模型工具。
-- `show_tool_progress`：控制 LLM 自主找图前是否发送“正在为你寻找...”这类前置提示；默认关闭，只保留最终图片或失败结果。
+- `llm_search_progress_message_enabled`：控制 LLM 自主找图前是否发送“正在为你寻找...”这类前置提示；默认关闭，只保留最终图片或失败结果。
 - `auto_source_enabled`、`default_source`、`fallback_enabled`、`fallback_order`：控制自动选源与回退策略。
 - `llm_review`：控制视觉审核、审核模型、失败时放行或触发回退、候选数量；`fail_open` 对 Pixiv、搜图神器和 SerpApi 三个来源统一生效。
 - `pixiv`：有模块总开关、三十四个功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。

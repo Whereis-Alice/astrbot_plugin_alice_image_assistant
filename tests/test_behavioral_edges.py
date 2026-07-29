@@ -48,7 +48,7 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(event.sent, [])
 
-        plugin.find_config["show_tool_progress"] = True
+        plugin.find_config["llm_search_progress_message_enabled"] = True
         await plugin.tool_find_image(
             event,
             query="星之卡比",

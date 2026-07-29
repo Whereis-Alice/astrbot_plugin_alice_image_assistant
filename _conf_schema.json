@@ -31,7 +31,7 @@
         "hint": "仅在配图能明显帮助理解时使用；用户明确找图不受此项影响。",
         "default": true
       },
-      "show_tool_progress": {
+      "llm_search_progress_message_enabled": {
         "type": "bool",
         "description": "LLM 自主找图前发送“正在为你寻找...”提示",
         "hint": "关闭后 Bot 通过 LLM 工具找图时不再额外发送前置提示，只发送最终图片或失败结果。",

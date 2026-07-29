@@ -244,7 +244,7 @@ class AliceImageAssistantPlugin(Star):
                 {"success": False, "error": "没有可用找图来源"},
                 ensure_ascii=False,
             )
-        if self.find_config.get("show_tool_progress", False):
+        if self.find_config.get("llm_search_progress_message_enabled", False):
             await event.send(event.plain_result(f"正在为你寻找「{query}」的图片..."))
         outcome = await self.forward.search(
             event,
