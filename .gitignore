@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+/data/
+*.sqlite3
+*.db-journal
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.idea/
+.vscode/

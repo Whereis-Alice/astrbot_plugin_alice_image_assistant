@@ -1,0 +1,317 @@
+{
+  "find_image": {
+    "type": "object",
+    "description": "找图模块",
+    "hint": "文字找图、Pixiv、自动选源、失败回退和 LLM 视觉审核。",
+    "items": {
+      "enabled": {
+        "type": "bool",
+        "description": "启用找图模块",
+        "default": true
+      },
+      "commands_enabled": {
+        "type": "bool",
+        "description": "启用找图与 Pixiv 指令",
+        "default": true
+      },
+      "llm_tools_enabled": {
+        "type": "bool",
+        "description": "启用找图 LLM 工具",
+        "hint": "关闭后不会向模型暴露 alice_image_find 和 Pixiv 小说工具。",
+        "default": true
+      },
+      "inject_tool_guidance_enabled": {
+        "type": "bool",
+        "description": "向模型注入图片工具使用提示",
+        "default": true
+      },
+      "auto_illustration_enabled": {
+        "type": "bool",
+        "description": "允许 Bot 主动为介绍内容配图",
+        "hint": "仅在配图能明显帮助理解时使用；用户明确找图不受此项影响。",
+        "default": true
+      },
+      "show_tool_progress": {
+        "type": "bool",
+        "description": "LLM 找图时发送进度提示",
+        "default": true
+      },
+      "tool_send_images": {
+        "type": "bool",
+        "description": "LLM 工具直接向用户发送图片",
+        "hint": "关闭后工具只返回结果信息；指令仍会发图。",
+        "default": true
+      },
+      "auto_source_enabled": {
+        "type": "bool",
+        "description": "允许 auto 根据内容自动选源",
+        "default": true
+      },
+      "default_source": {
+        "type": "string",
+        "description": "关闭自动选源后的默认来源",
+        "options": ["pixiv", "soutu", "serpapi"],
+        "default": "soutu"
+      },
+      "fallback_enabled": {
+        "type": "bool",
+        "description": "来源失败时自动回退",
+        "default": true
+      },
+      "fallback_order": {
+        "type": "list",
+        "description": "找图来源回退顺序",
+        "hint": "可用值：pixiv、soutu、serpapi；重复或未知值会被忽略。",
+        "default": ["pixiv", "soutu", "serpapi"]
+      },
+      "llm_review": {
+        "type": "object",
+        "description": "LLM 视觉审核",
+        "hint": "让视觉模型比较候选图并挑选最符合描述的结果。",
+        "items": {
+          "enabled": {
+            "type": "bool",
+            "description": "启用视觉审核挑图",
+            "default": true
+          },
+          "commands_enabled": {
+            "type": "bool",
+            "description": "指令找图也使用视觉审核",
+            "default": true
+          },
+          "provider_id": {
+            "type": "string",
+            "description": "审核模型",
+            "hint": "留空使用当前会话模型；模型必须支持图片输入。",
+            "_special": "select_provider",
+            "default": ""
+          },
+          "fail_open": {
+            "type": "bool",
+            "description": "审核不可用时放行首选结果",
+            "hint": "关闭后审核模型失败会让该来源失败，并触发来源回退。",
+            "default": true
+          },
+          "candidate_count": {
+            "type": "int",
+            "description": "Pixiv 审核候选数",
+            "default": 12,
+            "slider": {"min": 2, "max": 24, "step": 1}
+          },
+          "pixiv_search_pages": {
+            "type": "int",
+            "description": "Pixiv 精确找图抓取页数",
+            "default": 5,
+            "slider": {"min": 1, "max": 20, "step": 1}
+          },
+          "max_concurrency": {
+            "type": "int",
+            "description": "视觉审核最大并发数",
+            "default": 2,
+            "slider": {"min": 1, "max": 8, "step": 1}
+          }
+        }
+      },
+      "pixiv": {
+        "type": "object",
+        "description": "Pixiv 找图",
+        "items": {
+          "enabled": {
+            "type": "bool",
+            "description": "启用 Pixiv 模块",
+            "default": true
+          },
+          "features": {
+            "type": "object",
+            "description": "Pixiv 功能开关",
+            "items": {
+              "llm_search": {"type": "bool", "description": "LLM Pixiv 精确找图", "default": true},
+              "novel_tool": {"type": "bool", "description": "Pixiv 小说 LLM 工具", "default": true},
+              "illust_search": {"type": "bool", "description": "标签搜索插画", "default": true},
+              "illust_new": {"type": "bool", "description": "最新插画", "default": true},
+              "illust_recommended": {"type": "bool", "description": "推荐插画", "default": true},
+              "illust_and": {"type": "bool", "description": "AND 多标签搜索", "default": true},
+              "url_lookup": {"type": "bool", "description": "自动解析 Pixiv 作品链接", "default": true},
+              "illust_detail": {"type": "bool", "description": "作品 ID 详情", "default": true},
+              "ranking": {"type": "bool", "description": "排行榜", "default": true},
+              "related": {"type": "bool", "description": "相关作品", "default": true},
+              "deep_search": {"type": "bool", "description": "深度搜索", "default": true},
+              "illust_comments": {"type": "bool", "description": "插画评论", "default": true},
+              "showcase": {"type": "bool", "description": "特辑详情", "default": true},
+              "user_search": {"type": "bool", "description": "画师搜索", "default": true},
+              "user_detail": {"type": "bool", "description": "画师详情", "default": true},
+              "user_illusts": {"type": "bool", "description": "画师作品", "default": true},
+              "novel_search": {"type": "bool", "description": "小说搜索", "default": true},
+              "novel_recommended": {"type": "bool", "description": "推荐小说", "default": true},
+              "novel_new": {"type": "bool", "description": "最新小说", "default": true},
+              "novel_series": {"type": "bool", "description": "小说系列", "default": true},
+              "novel_comments": {"type": "bool", "description": "小说评论", "default": true},
+              "novel_download": {"type": "bool", "description": "小说 PDF 下载", "default": true},
+              "subscriptions": {"type": "bool", "description": "画师订阅与定时推送", "default": true},
+              "random_search": {"type": "bool", "description": "随机标签搜索", "default": true},
+              "random_ranking": {"type": "bool", "description": "随机排行榜", "default": true},
+              "trending_tags": {"type": "bool", "description": "趋势标签", "default": true},
+              "ai_display_setting": {"type": "bool", "description": "会话内 AI 作品显示设置", "default": true},
+              "runtime_config": {"type": "bool", "description": "指令修改 Pixiv 配置", "default": true},
+              "hot_search": {"type": "bool", "description": "按热度搜索", "default": true},
+              "fanbox_creator": {"type": "bool", "description": "Fanbox 创作者", "default": true},
+              "fanbox_post": {"type": "bool", "description": "Fanbox 帖子", "default": true},
+              "fanbox_recommended": {"type": "bool", "description": "Fanbox 推荐", "default": true},
+              "fanbox_artist": {"type": "bool", "description": "Fanbox 画师搜索", "default": true},
+              "help": {"type": "bool", "description": "Pixiv 帮助指令", "default": true}
+            }
+          },
+          "settings": {
+            "type": "object",
+            "description": "Pixiv 参数",
+            "items": {
+              "refresh_token": {
+                "type": "string",
+                "description": "Pixiv Refresh Token",
+                "hint": "Pixiv API 认证必需。",
+                "is_sensitive": true,
+                "default": ""
+              },
+              "fanbox_sessid": {"type": "string", "description": "Fanbox FANBOXSESSID", "is_sensitive": true, "default": ""},
+              "fanbox_cookie": {"type": "string", "description": "Fanbox 完整 Cookie", "is_sensitive": true, "default": ""},
+              "fanbox_user_agent": {"type": "string", "description": "Fanbox User-Agent", "default": ""},
+              "fanbox_data_source": {"type": "string", "description": "Fanbox 数据源", "options": ["auto", "official", "nekohouse"], "default": "auto"},
+              "return_count": {"type": "int", "description": "指令默认返回作品数", "default": 1, "slider": {"min": 1, "max": 10, "step": 1}},
+              "r18_mode": {"type": "string", "description": "R18 过滤模式", "options": ["过滤 R18", "允许 R18", "仅 R18"], "default": "过滤 R18"},
+              "filter_r18g_only": {"type": "bool", "description": "额外过滤 R18G", "default": false},
+              "ai_filter_mode": {"type": "string", "description": "AI 作品过滤", "options": ["显示 AI 作品", "过滤 AI 作品", "仅 AI 作品"], "default": "显示 AI 作品"},
+              "ai_detection_mode": {"type": "string", "description": "AI 判定方式", "options": ["field_or_tag", "field_only", "tag_only"], "default": "field_or_tag"},
+              "min_bookmarks": {"type": "int", "description": "最小收藏数，0 关闭", "default": 0},
+              "min_views": {"type": "int", "description": "最小浏览数，0 关闭", "default": 0},
+              "min_likes": {"type": "int", "description": "最小点赞数，0 关闭", "default": 0},
+              "deep_search_depth": {"type": "int", "description": "深度搜索页数；-1 不限", "default": 3},
+              "show_details": {"type": "bool", "description": "附带作品详情", "default": true},
+              "forward_threshold": {"type": "bool", "description": "使用合并转发发送", "default": false},
+              "pixiv_urlsearch_enabled": {"type": "bool", "description": "允许作品链接自动解析", "default": true},
+              "ugoira_enabled": {"type": "bool", "description": "启用 Ugoira 转 GIF", "default": true},
+              "show_filter_result": {"type": "bool", "description": "显示过滤说明", "default": true},
+              "single_response_mode": {"type": "bool", "description": "一次合并发送搜索结果", "default": true},
+              "image_quality": {"type": "string", "description": "图片质量", "options": ["original", "large", "medium"], "default": "medium"},
+              "image_send_method": {"type": "string", "description": "图片发送方式", "options": ["url", "file", "byte"], "default": "url"},
+              "pil_compress_quality": {"type": "int", "description": "本地压缩画质", "default": 100, "slider": {"min": 1, "max": 100, "step": 1}},
+              "pil_compress_target_kb": {"type": "int", "description": "本地压缩目标 KB；0 关闭", "default": 0},
+              "refresh_token_interval_minutes": {"type": "int", "description": "Token 刷新间隔分钟；0 关闭", "default": 180},
+              "subscription_enabled": {"type": "bool", "description": "启用订阅后台任务", "default": true},
+              "subscription_force_forward": {"type": "bool", "description": "订阅消息强制合并转发", "default": true},
+              "subscription_check_interval_minutes": {"type": "int", "description": "订阅检查间隔分钟", "default": 30},
+              "proxy": {"type": "string", "description": "Pixiv HTTP/HTTPS 代理", "default": ""},
+              "image_proxy_host": {"type": "string", "description": "Pixiv 图片反代主机", "default": "i.pixiv.re"},
+              "use_image_proxy": {"type": "bool", "description": "无代理时使用图片反代", "default": true},
+              "api_proxy_host": {"type": "string", "description": "Pixiv API 反代主机", "default": ""},
+              "random_search_min_interval": {"type": "int", "description": "随机搜索最短间隔分钟", "default": 60},
+              "random_search_max_interval": {"type": "int", "description": "随机搜索最长间隔分钟", "default": 120},
+              "random_sent_illust_retention_days": {"type": "int", "description": "随机搜索去重保留天数", "default": 7}
+            }
+          }
+        }
+      },
+      "soutu": {
+        "type": "object",
+        "description": "搜图神器来源",
+        "hint": "抓取 soutushenqi.com，候选不足时可用 Bing 补齐。需要 Playwright Chromium。",
+        "items": {
+          "enabled": {"type": "bool", "description": "启用搜图神器来源", "default": true},
+          "primary_source_enabled": {"type": "bool", "description": "启用 soutushenqi.com 主图源", "default": true},
+          "bing_fallback_enabled": {"type": "bool", "description": "启用 Bing 候选补充", "default": true},
+          "vlm_selection_enabled": {"type": "bool", "description": "允许视觉模型从候选中挑图", "default": true},
+          "vlm_provider_id": {"type": "string", "description": "搜图神器审核模型", "_special": "select_provider", "default": ""},
+          "batch_size": {"type": "int", "description": "候选高清图数量", "default": 9, "slider": {"min": 1, "max": 16, "step": 1}},
+          "min_resolution": {"type": "int", "description": "候选最小边像素", "default": 500, "slider": {"min": 100, "max": 4000, "step": 100}}
+        }
+      },
+      "serpapi": {
+        "type": "object",
+        "description": "SerpApi 文字搜图来源",
+        "hint": "只整合上游的文字搜图：Google Images 候选加视觉淘汰赛。",
+        "items": {
+          "enabled": {"type": "bool", "description": "启用 SerpApi 文字搜图", "default": true},
+          "serpapi_keys": {"type": "list", "description": "SerpApi Keys", "hint": "支持多个 Key 轮询。", "default": []},
+          "vlm_selection_enabled": {"type": "bool", "description": "启用 SerpApi 视觉淘汰赛", "default": true},
+          "vlm_provider_id": {"type": "string", "description": "SerpApi 选图模型", "_special": "select_provider", "default": ""},
+          "batch_size": {"type": "int", "description": "每轮拼图候选数", "default": 16, "slider": {"min": 2, "max": 64, "step": 1}},
+          "scrape_count": {"type": "int", "description": "搜索候选数量", "default": 16, "slider": {"min": 1, "max": 200, "step": 1}},
+          "gl": {"type": "string", "description": "搜索地区代码", "default": "us"},
+          "hl": {"type": "string", "description": "搜索界面语言", "default": "zh-cn"},
+          "proxy_url": {"type": "string", "description": "SerpApi 代理 URL", "default": ""},
+          "user_agent": {"type": "string", "description": "图片下载 User-Agent", "default": ""}
+        }
+      }
+    }
+  },
+  "reverse_image": {
+    "type": "object",
+    "description": "以图搜图模块",
+    "hint": "支持 SauceNAO、Google Lens、Ascii2d，保留附图、回复图和等待下一张图的指令交互。",
+    "items": {
+      "enabled": {"type": "bool", "description": "启用以图搜图模块", "default": true},
+      "commands_enabled": {"type": "bool", "description": "启用 /爱图溯 指令", "default": true},
+      "llm_tools_enabled": {"type": "bool", "description": "启用以图搜图 LLM 工具", "default": true},
+      "inject_tool_guidance_enabled": {"type": "bool", "description": "向模型注入以图搜图工具提示", "default": true},
+      "list_images_tool_enabled": {"type": "bool", "description": "启用会话图片列表工具", "default": true},
+      "reverse_tool_enabled": {"type": "bool", "description": "启用图片溯源工具", "default": true},
+      "ai_behavior": {
+        "type": "object",
+        "description": "图片上下文与工具行为",
+        "items": {
+          "capture_image_context": {"type": "bool", "description": "记录会话图片供 Bot 自主选择", "default": true},
+          "image_context_isolation": {"type": "string", "description": "图片上下文隔离", "options": ["session", "global"], "default": "session"},
+          "max_images_per_session": {"type": "int", "description": "每会话最大图片数", "default": 20, "slider": {"min": 5, "max": 50, "step": 5}},
+          "image_context_ttl_seconds": {"type": "int", "description": "图片上下文有效秒数；0 不过期", "default": 0},
+          "max_image_context_sessions": {"type": "int", "description": "最大图片会话数", "default": 200},
+          "include_image_url_in_context": {"type": "bool", "description": "向模型显示原始图片 URL", "default": true},
+          "llm_tool_silent_mode": {"type": "bool", "description": "工具只返回结果，不自动发结果消息", "default": false}
+        }
+      },
+      "command": {
+        "type": "object",
+        "description": "指令交互",
+        "items": {
+          "image_wait_timeout_seconds": {"type": "int", "description": "无图指令等待下一张图的秒数", "default": 60, "slider": {"min": 30, "max": 120, "step": 5}}
+        }
+      },
+      "network": {
+        "type": "object",
+        "description": "反搜网络与图片上传",
+        "items": {
+          "proxy_url": {"type": "string", "description": "HTTP/HTTPS 代理 URL", "default": ""},
+          "user_agent": {"type": "string", "description": "请求 User-Agent", "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+          "allow_image_upload": {"type": "bool", "description": "允许上传本地图片到 Catbox", "hint": "开启意味着图片会交给第三方图床。", "default": true},
+          "allow_local_file_access": {"type": "bool", "description": "允许工具读取本地图片路径", "hint": "默认关闭，避免模型读取并上传服务器任意文件。", "default": false}
+        }
+      },
+      "api_keys": {
+        "type": "object",
+        "description": "反搜引擎凭据",
+        "items": {
+          "saucenao_api_key": {"type": "string", "description": "SauceNAO API Key", "is_sensitive": true, "default": ""},
+          "serpapi_keys": {"type": "list", "description": "Google Lens SerpApi Keys", "default": []},
+          "ascii2d_session_id": {"type": "string", "description": "Ascii2d _session_id", "is_sensitive": true, "default": ""},
+          "ascii2d_cf_clearance": {"type": "string", "description": "Ascii2d cf_clearance", "is_sensitive": true, "default": ""}
+        }
+      },
+      "strategies": {
+        "type": "object",
+        "description": "反搜引擎开关",
+        "items": {
+          "enable_saucenao": {"type": "bool", "description": "启用 SauceNAO", "default": true},
+          "saucenao_similarity_threshold": {"type": "int", "description": "SauceNAO 最低相似度", "default": 40, "slider": {"min": 0, "max": 100, "step": 5}},
+          "enable_google_lens": {"type": "bool", "description": "启用 Google Lens", "default": true},
+          "enable_ascii2d": {"type": "bool", "description": "启用 Ascii2d", "default": true}
+        }
+      },
+      "display": {
+        "type": "object",
+        "description": "反搜结果输出",
+        "items": {
+          "max_results": {"type": "int", "description": "每个引擎最大结果数", "default": 5, "slider": {"min": 1, "max": 10, "step": 1}},
+          "forward_message_enabled": {"type": "bool", "description": "QQ 优先使用合并转发", "default": true}
+        }
+      }
+    }
+  }
+}
