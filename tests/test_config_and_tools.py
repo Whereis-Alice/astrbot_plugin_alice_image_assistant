@@ -39,6 +39,7 @@ class ConfigAndToolTests(unittest.TestCase):
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
         features = schema["find_image"]["items"]["pixiv"]["items"]["features"]["items"]
         self.assertGreaterEqual(len(features), 30)
+        self.assertIn("artist_search", features)
         for name, item in features.items():
             with self.subTest(name=name):
                 self.assertEqual(item["type"], "bool")
@@ -74,6 +75,9 @@ class ConfigAndToolTests(unittest.TestCase):
         for tool in tools:
             self.assertEqual(tool.parameters["type"], "object")
             self.assertIn("properties", tool.parameters)
+        find_properties = tools[0].parameters["properties"]
+        self.assertIn("artist_name", find_properties)
+        self.assertIn("pixiv_user_id", find_properties)
 
     def test_no_upstream_public_command_or_tool_identifiers_remain(self) -> None:
         source = (PLUGIN_ROOT / "main.py").read_text("utf-8")

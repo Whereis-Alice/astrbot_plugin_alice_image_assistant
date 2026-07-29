@@ -28,7 +28,7 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.0.2"
+PLUGIN_VERSION = "1.0.3"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 
 
@@ -221,6 +221,59 @@ class AliceImageAssistantPlugin(Star):
             )
             yield event.plain_result(f"找图失败：{details or '所有来源均无结果'}")
 
+    async def _pixiv_artist_find_command(
+        self,
+        event: AstrMessageEvent,
+    ) -> AsyncGenerator[Any, None]:
+        if not self._find_commands_enabled() or self.forward is None:
+            yield event.plain_result("找图指令已关闭。")
+            return
+        if not self._pixiv_feature("artist_search"):
+            yield event.plain_result("Pixiv 指定画师找图功能已关闭。")
+            return
+
+        text = self._command_tail(event)
+        if not text:
+            yield event.plain_result(
+                "请提供画师和可选关键词，例如：/爱图P画师找 米山舞 | 初音ミク。"
+            )
+            return
+        if "|" in text:
+            artist_part, query = (part.strip() for part in text.split("|", 1))
+        elif "｜" in text:
+            artist_part, query = (part.strip() for part in text.split("｜", 1))
+        else:
+            artist_part, query = text.strip(), ""
+        if not artist_part:
+            yield event.plain_result(
+                "请提供画师名或 Pixiv 用户 ID，例如：/爱图P画师找 12345678 | 初音ミク。"
+            )
+            return
+
+        pixiv_user_id = artist_part if artist_part.isdigit() else ""
+        artist_name = "" if pixiv_user_id else artist_part
+        description = " ".join(part for part in (artist_part, query) if part)
+        label = f"{artist_part} 的 {query}" if query else artist_part
+        yield event.plain_result(f"正在从 Pixiv 画师作品中寻找「{label}」...")
+        outcome = await self.forward.search(
+            event,
+            query,
+            description,
+            source="pixiv",
+            count=1,
+            for_command=True,
+            artist_name=artist_name,
+            pixiv_user_id=pixiv_user_id,
+        )
+        if outcome.success:
+            artist = outcome.pixiv_artist_name or artist_part
+            yield event.plain_result(f"找图完成，Pixiv 画师：{artist}。")
+        else:
+            details = "；".join(
+                f"{name}: {message}" for name, message in outcome.errors.items()
+            )
+            yield event.plain_result(f"画师找图失败：{details or '没有找到可发送作品'}")
+
     async def tool_find_image(
         self,
         event: AstrMessageEvent,
@@ -229,6 +282,8 @@ class AliceImageAssistantPlugin(Star):
         source: str,
         count: int,
         is_explanation: bool,
+        artist_name: str = "",
+        pixiv_user_id: str = "",
     ) -> str:
         if not self.find_config.get("enabled", True) or not self.find_config.get(
             "llm_tools_enabled", True
@@ -258,6 +313,8 @@ class AliceImageAssistantPlugin(Star):
             source=source,
             count=count,
             for_command=False,
+            artist_name=artist_name,
+            pixiv_user_id=pixiv_user_id,
         )
         return outcome.to_json()
 
@@ -326,6 +383,8 @@ class AliceImageAssistantPlugin(Star):
             find_guidance = (
                 "用户明确要求找图、发图、看图或壁纸时，调用 alice_image_find。"
                 "source 可用 auto/pixiv/soutu/serpapi；不确定时用 auto。"
+                "用户指定 Pixiv 作者/画师时，填写 artist_name 或 pixiv_user_id，"
+                "不要把作者名混进普通标签假装作者限定。"
                 "visual_description 只写真实需要匹配的主体、外观与风格，不要虚构罕见细节。"
             )
             if self.find_config.get("auto_illustration_enabled", True):
@@ -382,6 +441,7 @@ class AliceImageAssistantPlugin(Star):
             "常用指令：\n"
             "/爱图找 <关键词>  自动找图\n"
             "/爱图P <标签>    Pixiv 找图\n"
+            "/爱图P画师找 <画师>|<关键词>  指定画师找图\n"
             "/爱图溯 [引擎]   附图、回复图片或随后发图\n"
             "/爱图P帮助       查看 Pixiv 全部指令"
         )
@@ -516,6 +576,11 @@ class AliceImageAssistantPlugin(Star):
         async for result in self._pixiv_results(
             event, "user_illusts", "pixiv_user_illusts", user_id
         ):
+            yield result
+
+    @filter.command("爱图P画师找")
+    async def pixiv_artist_find(self, event: AstrMessageEvent):
+        async for result in self._pixiv_artist_find_command(event):
             yield result
 
     @filter.command("爱图P文")

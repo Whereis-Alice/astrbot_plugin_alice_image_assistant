@@ -149,6 +149,7 @@
               "user_search": {"type": "bool", "description": "画师搜索", "default": true},
               "user_detail": {"type": "bool", "description": "画师详情", "default": true},
               "user_illusts": {"type": "bool", "description": "画师作品", "default": true},
+              "artist_search": {"type": "bool", "description": "指定画师精确找图", "default": true},
               "novel_search": {"type": "bool", "description": "小说搜索", "default": true},
               "novel_recommended": {"type": "bool", "description": "推荐小说", "default": true},
               "novel_new": {"type": "bool", "description": "最新小说", "default": true},

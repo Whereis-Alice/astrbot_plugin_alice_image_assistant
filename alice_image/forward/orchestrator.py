@@ -46,6 +46,9 @@ class ForwardOutcome:
     review_fallback: bool = False
     pixiv_ids: list[int] = field(default_factory=list)
     pixiv_found_count: int = 0
+    pixiv_artist_user_id: int | None = None
+    pixiv_artist_name: str = ""
+    pixiv_artist_account: str = ""
 
     def to_json(self) -> str:
         payload = asdict(self)
@@ -240,10 +243,15 @@ class ForwardSearchOrchestrator:
         count: int = 1,
         *,
         for_command: bool = False,
+        artist_name: str = "",
+        pixiv_user_id: str | int = "",
     ) -> ForwardOutcome:
         outcome = ForwardOutcome()
         query = str(query or "").strip()
-        if not query:
+        artist_name = str(artist_name or "").strip()
+        pixiv_user_id = str(pixiv_user_id or "").strip()
+        artist_scoped = bool(artist_name or pixiv_user_id)
+        if not query and not artist_scoped:
             outcome.errors["request"] = "搜索关键词不能为空。"
             return outcome
         try:
@@ -263,9 +271,16 @@ class ForwardSearchOrchestrator:
             0 if for_command else self._send_wait_timeout_seconds()
         )
 
-        sources = self.choose_sources(query, source)
+        if artist_scoped:
+            sources = ["pixiv"] if self._available("pixiv") else []
+        else:
+            sources = self.choose_sources(query, source)
         if not sources:
-            outcome.errors["configuration"] = "没有已启用且配置完整的找图来源。"
+            outcome.errors["configuration"] = (
+                "指定画师找图需要启用并配置 Pixiv 来源。"
+                if artist_scoped
+                else "没有已启用且配置完整的找图来源。"
+            )
             return outcome
 
         for current in sources:
@@ -280,6 +295,8 @@ class ForwardSearchOrchestrator:
                         review_enabled=review_enabled,
                         send_images=send_images,
                         send_wait_timeout_seconds=send_wait_timeout_seconds,
+                        artist_name=artist_name,
+                        pixiv_user_id=pixiv_user_id,
                     )
                     if result.success:
                         outcome.success = True
@@ -295,6 +312,15 @@ class ForwardSearchOrchestrator:
                         outcome.pixiv_ids = result.ids
                         outcome.pixiv_found_count = int(
                             getattr(result, "found_count", len(result.ids))
+                        )
+                        outcome.pixiv_artist_user_id = getattr(
+                            result, "artist_user_id", None
+                        )
+                        outcome.pixiv_artist_name = str(
+                            getattr(result, "artist_name", "") or ""
+                        )
+                        outcome.pixiv_artist_account = str(
+                            getattr(result, "artist_account", "") or ""
                         )
                         if result.error:
                             outcome.warnings[current] = result.error

@@ -32,9 +32,11 @@ class _Pixiv:
     def __init__(self, success: bool) -> None:
         self.success = success
         self.calls = 0
+        self.last_kwargs = {}
 
     async def search(self, *_args, **_kwargs):
         self.calls += 1
+        self.last_kwargs = _kwargs
         return SimpleNamespace(
             success=self.success,
             error="pixiv failed" if not self.success else "",
@@ -44,6 +46,9 @@ class _Pixiv:
             delivery_uncertain=False,
             review_fallback=False,
             ids=[123] if self.success else [],
+            artist_user_id=4242 if _kwargs.get("artist_name") else None,
+            artist_name=_kwargs.get("artist_name", ""),
+            artist_account="",
         )
 
     async def close(self) -> None:
@@ -143,6 +148,38 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.source, "serpapi")
         self.assertEqual(result.attempted_sources, ["pixiv", "soutu", "serpapi"])
         self.assertEqual(set(result.errors), {"pixiv", "soutu"})
+
+    async def test_artist_scope_forces_pixiv_without_fallback(self) -> None:
+        pixiv, soutu, serp = _Pixiv(True), _Soutu(True), _Serp(True)
+        service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
+
+        result = await service.search(
+            _Event(),
+            "",
+            "米山舞 初音ミク",
+            "soutu",
+            artist_name="米山舞",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.source, "pixiv")
+        self.assertEqual(result.attempted_sources, ["pixiv"])
+        self.assertEqual(pixiv.last_kwargs["artist_name"], "米山舞")
+        self.assertEqual(pixiv.last_kwargs["pixiv_user_id"], "")
+        self.assertEqual(result.pixiv_artist_name, "米山舞")
+        self.assertEqual(soutu.calls, 0)
+        self.assertEqual(serp.calls, 0)
+
+    async def test_normal_auto_without_artist_still_prefers_soutu(self) -> None:
+        pixiv, soutu, serp = _Pixiv(True), _Soutu(True), _Serp(True)
+        service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
+
+        result = await service.search(_Event(), "雪山", "雪山日出", "auto")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.source, "soutu")
+        self.assertEqual(result.attempted_sources, ["soutu"])
+        self.assertEqual(pixiv.calls, 0)
 
     async def test_pixiv_found_but_send_timeout_does_not_fallback(self) -> None:
         pixiv = _PixivFoundButSendTimeout()

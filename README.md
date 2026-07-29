@@ -75,6 +75,7 @@ python -m playwright install chromium
 | `/爱图P画师 <关键词>` | 搜索画师 |
 | `/爱图P画师详 <用户ID>` | 画师详情 |
 | `/爱图P画师作 <用户ID>` | 画师作品 |
+| `/爱图P画师找 <画师名或用户ID> \| <关键词>` | 指定画师找图；关键词可省略 |
 | `/爱图P文 <标签>` | 搜索小说 |
 | `/爱图P文荐` / `/爱图P文新` | 推荐 / 最新小说 |
 | `/爱图P文系 <系列ID>` | 小说系列 |
@@ -98,7 +99,7 @@ python -m playwright install chromium
 
 | 工具 | 用途 |
 |---|---|
-| `alice_image_find` | 文字找图。模型可指定 `auto`、`pixiv`、`soutu` 或 `serpapi`，并提交准确的视觉描述用于挑图。 |
+| `alice_image_find` | 文字找图。模型可指定 `auto`、`pixiv`、`soutu` 或 `serpapi`；如需锁定 Pixiv 画师，可填写 `artist_name` 或 `pixiv_user_id`。 |
 | `alice_image_pixiv_novel` | 搜索或下载 Pixiv 小说。 |
 | `alice_image_list_session_images` | 列出当前会话可用于反搜的图片和稳定 `image_id`。 |
 | `alice_image_reverse_search` | 按 `image_id` 或索引以图搜图。 |
@@ -116,7 +117,7 @@ python -m playwright install chromium
 - `tool_send_wait_timeout_seconds`：LLM 工具等待平台发图确认的最长秒数；默认 45，设为 `0` 表示一直等待。
 - `auto_source_enabled`、`default_source`、`fallback_enabled`、`fallback_order`：控制自动选源与回退策略。
 - `llm_review`：控制视觉审核、审核模型、失败时放行或触发回退、候选数量；`fail_open` 对 Pixiv、搜图神器和 SerpApi 三个来源统一生效。
-- `pixiv`：有模块总开关、三十四个功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。
+- `pixiv`：有模块总开关、三十五个功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。
 - `soutu`：可分别关主图源、Bing 补充和视觉挑图。关闭 `enabled` 后不会启动 Playwright 抓取。
 - `serpapi`：仅包含文字搜图；填写 `serpapi_keys` 后可轮询多个 Key，并可独立关闭 `vlm_selection_enabled` 视觉淘汰赛。
 

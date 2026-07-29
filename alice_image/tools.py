@@ -23,6 +23,7 @@ class AliceFindImageTool(FunctionTool[AstrAgentContext]):
     description: str = (
         "为用户精确搜索并发送图片。可在 Pixiv、通用网页图源和 SerpApi 之间自由选源；"
         "source=auto 时由助手判断，失败时插件会按配置自动回退。"
+        "需要指定 Pixiv 作者/画师时，填写 artist_name 或 pixiv_user_id。"
         "visual_description 只写画面中确实需要匹配的主体、外观和风格，不要捏造罕见动作或场景。"
     )
     parameters: dict[str, Any] = Field(
@@ -41,6 +42,14 @@ class AliceFindImageTool(FunctionTool[AstrAgentContext]):
                     "type": "string",
                     "enum": ["auto", "pixiv", "soutu", "serpapi"],
                     "description": "找图来源。auto 自动选择；也可明确指定。",
+                },
+                "artist_name": {
+                    "type": "string",
+                    "description": "可选。指定 Pixiv 画师名或账号；填写后会限定在该画师作品中找图。",
+                },
+                "pixiv_user_id": {
+                    "type": "string",
+                    "description": "可选。Pixiv 用户 ID，比 artist_name 更精确；填写后会限定在该用户作品中找图。",
                 },
                 "count": {
                     "type": "integer",
@@ -72,6 +81,8 @@ class AliceFindImageTool(FunctionTool[AstrAgentContext]):
             source=kwargs.get("source", "auto"),
             count=kwargs.get("count", 1),
             is_explanation=bool(kwargs.get("is_explanation", False)),
+            artist_name=kwargs.get("artist_name", ""),
+            pixiv_user_id=kwargs.get("pixiv_user_id", ""),
         )
 
 
