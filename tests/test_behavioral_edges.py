@@ -16,6 +16,50 @@ from astrbot_plugin_alice_image_assistant.main import AliceImageAssistantPlugin
 
 
 class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_find_tool_progress_message_is_opt_in(self) -> None:
+        class _Event:
+            def __init__(self) -> None:
+                self.sent = []
+
+            @staticmethod
+            def plain_result(text: str) -> str:
+                return text
+
+            async def send(self, result) -> None:
+                self.sent.append(result)
+
+        class _Forward:
+            async def search(self, *_args, **_kwargs):
+                return SimpleNamespace(to_json=lambda: '{"success": true}')
+
+        plugin = AliceImageAssistantPlugin.__new__(AliceImageAssistantPlugin)
+        plugin.find_config = {"enabled": True, "llm_tools_enabled": True}
+        plugin.forward = _Forward()
+        event = _Event()
+
+        await plugin.tool_find_image(
+            event,
+            query="星之卡比",
+            description="星之卡比",
+            source="auto",
+            count=1,
+            is_explanation=False,
+        )
+
+        self.assertEqual(event.sent, [])
+
+        plugin.find_config["show_tool_progress"] = True
+        await plugin.tool_find_image(
+            event,
+            query="星之卡比",
+            description="星之卡比",
+            source="auto",
+            count=1,
+            is_explanation=False,
+        )
+
+        self.assertEqual(event.sent, ["正在为你寻找「星之卡比」的图片..."])
+
     async def test_reverse_guidance_works_when_find_module_is_disabled(self) -> None:
         plugin = AliceImageAssistantPlugin.__new__(AliceImageAssistantPlugin)
         plugin.find_config = {"enabled": False}

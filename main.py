@@ -28,13 +28,13 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.1"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 
 
 @register(
     PLUGIN_ID,
-    "Huli3",
+    "Whereis-Alice",
     "让 Bot 自主精确找图、挑图和以图搜图，并保留完整指令入口。",
     PLUGIN_VERSION,
     PLUGIN_REPO,
@@ -244,7 +244,7 @@ class AliceImageAssistantPlugin(Star):
                 {"success": False, "error": "没有可用找图来源"},
                 ensure_ascii=False,
             )
-        if self.find_config.get("show_tool_progress", True):
+        if self.find_config.get("show_tool_progress", False):
             await event.send(event.plain_result(f"正在为你寻找「{query}」的图片..."))
         outcome = await self.forward.search(
             event,
