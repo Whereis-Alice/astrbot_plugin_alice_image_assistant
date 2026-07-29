@@ -1,0 +1,1 @@
+# astrbot_plugin_alice_image_assistant
