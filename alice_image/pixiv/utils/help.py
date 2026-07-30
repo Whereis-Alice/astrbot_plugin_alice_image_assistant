@@ -4,9 +4,64 @@ help.py
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, Optional
 from astrbot.api import logger
+
+
+_PUBLIC_COMMAND_NAMES = {
+    "/pixiv": "/aaP",
+    "/pixiv_ai_show_settings": "/aaPAI",
+    "/pixiv_and": "/aaP并",
+    "/pixiv_config": "/aaP设置",
+    "/pixiv_deepsearch": "/aaP深",
+    "/pixiv_fanbox_artist": "/aaF找",
+    "/pixiv_fanbox_creator": "/aaF主",
+    "/pixiv_fanbox_post": "/aaF帖",
+    "/pixiv_fanbox_recommended": "/aaF荐",
+    "/pixiv_help": "/aaP帮助",
+    "/pixiv_hot": "/aaP热",
+    "/pixiv_illust_comments": "/aaP评",
+    "/pixiv_illust_new": "/aaP新",
+    "/pixiv_novel": "/aaP文",
+    "/pixiv_novel_comments": "/aaP文评",
+    "/pixiv_novel_download": "/aaP文下",
+    "/pixiv_novel_new": "/aaP文新",
+    "/pixiv_novel_recommended": "/aaP文荐",
+    "/pixiv_novel_series": "/aaP文系",
+    "/pixiv_random_add": "/aaP随加",
+    "/pixiv_random_del": "/aaP随删",
+    "/pixiv_random_force": "/aaP随跑",
+    "/pixiv_random_list": "/aaP随列",
+    "/pixiv_random_ranking_add": "/aaP随榜加",
+    "/pixiv_random_ranking_del": "/aaP随榜删",
+    "/pixiv_random_ranking_list": "/aaP随榜列",
+    "/pixiv_random_resume": "/aaP随开",
+    "/pixiv_random_status": "/aaP随态",
+    "/pixiv_random_suspend": "/aaP随停",
+    "/pixiv_ranking": "/aaP榜",
+    "/pixiv_recommended": "/aaP荐",
+    "/pixiv_related": "/aaP似",
+    "/pixiv_showcase_article": "/aaP辑",
+    "/pixiv_specific": "/aaPID",
+    "/pixiv_subscribe_add": "/aaP订",
+    "/pixiv_subscribe_list": "/aaP订阅",
+    "/pixiv_subscribe_remove": "/aaP退",
+    "/pixiv_trending_tags": "/aaP趋势",
+    "/pixiv_user_detail": "/aaP画师详",
+    "/pixiv_user_illusts": "/aaP画师作",
+    "/pixiv_user_search": "/aaP画师",
+}
+_UPSTREAM_COMMAND_PATTERN = re.compile(r"/pixiv(?:_[a-z_]+)?(?![a-zA-Z0-9_])")
+
+
+def replace_public_command_names(message: str) -> str:
+    """Replace upstream command examples with this plugin's public commands."""
+    return _UPSTREAM_COMMAND_PATTERN.sub(
+        lambda match: _PUBLIC_COMMAND_NAMES.get(match.group(0), match.group(0)),
+        message,
+    )
 
 
 class HelpManager:
@@ -49,7 +104,7 @@ class HelpManager:
             str: 帮助消息
         """
         if key in self._help_messages:
-            return self._help_messages[key]
+            return replace_public_command_names(self._help_messages[key])
         else:
             logger.warning(f"Pixiv 插件：未找到帮助消息键: {key}")
             return default or f"帮助消息 '{key}' 未找到"

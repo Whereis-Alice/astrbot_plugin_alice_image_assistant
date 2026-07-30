@@ -25,9 +25,7 @@ class SubscribeHandler:
             return
 
         if not artist_id or not artist_id.isdigit():
-            yield event.plain_result(
-                "请输入有效的画师ID。用法: /pixiv_subscribe_add <画师ID>"
-            )
+            yield event.plain_result("请输入有效的画师ID。用法: /aaP订 <画师ID>")
             return
 
         platform_name = event.platform_meta.id
@@ -90,9 +88,7 @@ class SubscribeHandler:
             return
 
         if not artist_id or not artist_id.isdigit():
-            yield event.plain_result(
-                "请输入有效的画师ID。用法: /pixiv_subscribe_remove <画师ID>"
-            )
+            yield event.plain_result("请输入有效的画师ID。用法: /aaP退 <画师ID>")
             return
 
         chat_id = event.get_group_id() or event.get_sender_id()

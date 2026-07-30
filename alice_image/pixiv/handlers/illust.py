@@ -45,8 +45,13 @@ class IllustHandler:
             logger.error(f"获取插画信息失败: {e}")
             yield event.plain_result("获取插画信息失败，请稍后再试。")
 
-    async def pixiv_search_illust(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv 命令，默认为标签搜索功能"""
+    async def pixiv_search_illust(
+        self,
+        event: AstrMessageEvent,
+        tags: str = "",
+        return_count: int | None = None,
+    ):
+        """处理 Pixiv 标签搜索，并支持单次覆盖返回作品数。"""
         # 清理标签字符串，并检查是否为空或为 "help"
         cleaned_tags = tags.strip()
 
@@ -60,7 +65,7 @@ class IllustHandler:
         if not cleaned_tags:
             logger.info("Pixiv 插件：用户未提供搜索标签或标签为空，返回帮助信息。")
             yield event.plain_result(
-                "请输入要搜索的标签。使用 `/pixiv_help` 查看帮助。\n"
+                "请输入要搜索的标签。使用 `/aaP帮助` 查看帮助。\n"
                 + self.pixiv_config.get_auth_error_message()
             )
             return
@@ -102,7 +107,7 @@ class IllustHandler:
                 ai_filter_mode=self.pixiv_config.ai_filter_mode,
                 ai_detection_mode=self.pixiv_config.ai_detection_mode,
                 display_tag_str=display_tags,
-                return_count=self.pixiv_config.return_count,
+                return_count=self.pixiv_config.resolve_return_count(return_count),
                 logger=logger,
                 show_filter_result=self.pixiv_config.show_filter_result,
                 single_response_mode=self.pixiv_config.single_response_mode,
@@ -272,7 +277,7 @@ class IllustHandler:
             yield event.plain_result(f"获取推荐作品时发生错误: {str(e)}")
 
     async def pixiv_and(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv_and 命令，进行 AND 逻辑深度搜索"""
+        """处理 /aaP并 命令，进行 AND 逻辑深度搜索"""
         # 清理标签字符串
         cleaned_tags = tags.strip()
 
@@ -281,7 +286,7 @@ class IllustHandler:
                 "Pixiv 插件 (AND)：用户未提供搜索标签或标签为空，返回帮助信息。"
             )
             yield event.plain_result(
-                "请输入要进行 AND 搜索的标签 (用逗号分隔)。使用 `/pixiv_help` 查看帮助。\n"
+                "请输入要进行 AND 搜索的标签 (用逗号分隔)。使用 `/aaP帮助` 查看帮助。\n"
                 "支持排除标签功能，使用 -<标签> 来排除特定标签。\n\n"
                 "**配置说明**:\n1. 先配置代理->[Astrbot代理配置教程](https://astrbot.app/config/astrbot-config.html#http-proxy);\n2. 再填入 `refresh_token`->**Pixiv Refresh Token**: 必填，用于 API 认证。获取方法请参考 [pixivpy3 文档](https://pypi.org/project/pixivpy3/) 或[这里](https://gist.github.com/karakoo/5e7e0b1f3cc74cbcb7fce1c778d3709e)。"
             )
@@ -468,7 +473,7 @@ class IllustHandler:
         # 检查是否提供了作品 ID
         if not illust_id:
             yield event.plain_result(
-                "请输入要查询的作品 ID。使用 `/pixiv_help` 查看帮助。"
+                "请输入要查询的作品 ID。使用 `/aaP帮助` 查看帮助。"
             )
             return
 
@@ -588,7 +593,7 @@ class IllustHandler:
 
         if mode not in valid_modes:
             yield event.plain_result(
-                f"无效的排行榜模式: {mode}\n请使用 `/pixiv_ranking help` 查看支持的模式"
+                f"无效的排行榜模式: {mode}\n请使用 `/aaP榜 help` 查看支持的模式"
             )
             return
 
@@ -754,13 +759,13 @@ class IllustHandler:
     async def pixiv_deepsearch(self, event: AstrMessageEvent, tags: str):
         """
         深度搜索 Pixiv 插画，通过翻页获取多页结果
-        用法: /pixiv_deepsearch <标签1>,<标签2>,...
+        用法: /aaP深 <标签1>,<标签2>,...
         注意: 翻页深度由配置中的 deep_search_depth 参数控制
         """
         # 验证用户输入
         if not tags or tags.strip().lower() == "help":
             yield event.plain_result(
-                "用法: /pixiv_deepsearch <标签1>,<标签2>,...\n"
+                "用法: /aaP深 <标签1>,<标签2>,...\n"
                 "深度搜索 Pixiv 插画，将遍历多个结果页面。\n"
                 "支持排除标签功能，使用 -<标签> 来排除特定标签。\n"
                 f"当前翻页深度设置: {self.pixiv_config.deep_search_depth} 页 (-1 表示获取所有页面)"
@@ -1087,7 +1092,7 @@ class IllustHandler:
             # 如果评论数量超过显示限制，提示用户
             if len(comments) > max_comments:
                 next_offset = (int(offset) if offset else 0) + max_comments
-                comment_info += f"\n已显示前 {max_comments} 条评论，使用 /pixiv_illust_comments {illust_id} {next_offset} 查看更多。"
+                comment_info += f"\n已显示前 {max_comments} 条评论，使用 /aaP评 {illust_id} {next_offset} 查看更多。"
 
             yield event.plain_result(comment_info)
 
@@ -1306,7 +1311,7 @@ class IllustHandler:
     ):
         """
         按热度（收藏数）搜索特定标签的作品
-        用法: /pixiv_hot <标签> [时间范围] [页数]
+        用法: /aaP热 <标签> [时间范围] [页数]
         时间范围: day(一天内), week(一周内,默认), month(一月内), all(全部)
         """
         args_list = [
@@ -1323,13 +1328,13 @@ class IllustHandler:
         if not args_list or args_list[0].lower() == "help":
             help_text = (
                 "🔥 **热度搜索** - 按收藏数排序搜索作品\n\n"
-                "**用法**: `/pixiv_hot <标签> [时间范围] [页数]`\n\n"
+                "**用法**: `/aaP热 <标签> [时间范围] [页数]`\n\n"
                 "**时间范围**: day/week(默认)/month/all\n\n"
                 "**示例**:\n"
-                "- `/pixiv_hot 可莉` - 搜索一周内可莉的热门图\n"
-                "- `/pixiv_hot クレー(原神) month` - 一个月内的热门图\n"
-                "- `/pixiv_hot 甘雨 week 10` - 一周内，抓取10页\n"
-                "- `/pixiv_hot 可莉,-R18` - 排除R18内容\n\n"
+                "- `/aaP热 可莉` - 搜索一周内可莉的热门图\n"
+                "- `/aaP热 クレー(原神) month` - 一个月内的热门图\n"
+                "- `/aaP热 甘雨 week 10` - 一周内，抓取10页\n"
+                "- `/aaP热 可莉,-R18` - 排除R18内容\n\n"
                 "💡 本功能通过抓取多页后按收藏数排序，无需会员"
             )
             yield event.plain_result(help_text)

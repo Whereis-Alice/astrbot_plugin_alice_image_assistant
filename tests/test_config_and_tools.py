@@ -9,12 +9,16 @@ from astrbot_plugin_alice_image_assistant.alice_image.config import NestedConfig
 from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.config import (
     PixivConfig,
 )
+from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.help import (
+    replace_public_command_names,
+)
 from astrbot_plugin_alice_image_assistant.alice_image.tools import (
     AliceFindImageTool,
     AlicePixivNovelTool,
     AliceReverseImageTool,
     AliceSessionImagesTool,
 )
+from astrbot_plugin_alice_image_assistant.main import AliceImageAssistantPlugin
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,6 +66,14 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertEqual(schema_default, "medium")
         self.assertEqual(PixivConfig({}).image_quality, schema_default)
 
+    def test_pixiv_command_return_count_can_be_overridden_once(self) -> None:
+        config = PixivConfig({"return_count": 3})
+
+        self.assertEqual(config.resolve_return_count(), 3)
+        self.assertEqual(config.resolve_return_count(1), 1)
+        self.assertEqual(config.return_count, 3)
+        self.assertEqual(PixivConfig({"return_count": 99}).return_count, 10)
+
     def test_llm_tool_names_and_schemas_are_unique(self) -> None:
         tools = [
             AliceFindImageTool(plugin=object()),
@@ -92,7 +104,29 @@ class ConfigAndToolTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         command_names = re.findall(r'@filter\.command\("([^"]+)"', source)
         self.assertEqual(len(command_names), len(set(command_names)))
-        self.assertTrue(all(name.startswith("爱图") for name in command_names))
+        self.assertTrue(all(name.startswith("aa") for name in command_names))
+        self.assertNotIn('@filter.command("爱图', source)
+        self.assertNotIn('alias=["alice-', source)
+
+    def test_optional_pixiv_command_count_preserves_multi_word_query(self) -> None:
+        parser = AliceImageAssistantPlugin._parse_query_count
+
+        self.assertEqual(parser("星之卡比 1"), ("星之卡比", 1, ""))
+        self.assertEqual(parser("初音ミク 冬"), ("初音ミク 冬", None, ""))
+        query, count, error = parser("星之卡比 11")
+        self.assertEqual((query, count), ("星之卡比", None))
+        self.assertIn("1-10", error)
+
+    def test_pixiv_help_examples_use_public_commands(self) -> None:
+        message = (
+            "`/pixiv 初音ミク` `/pixiv_user_search 米山舞` "
+            "https://pypi.org/project/pixivpy3/"
+        )
+        replaced = replace_public_command_names(message)
+
+        self.assertIn("`/aaP 初音ミク`", replaced)
+        self.assertIn("`/aaP画师 米山舞`", replaced)
+        self.assertIn("/project/pixivpy3/", replaced)
 
 
 if __name__ == "__main__":

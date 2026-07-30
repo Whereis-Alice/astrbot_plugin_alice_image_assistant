@@ -925,7 +925,7 @@ class FanboxHandler:
         raise RuntimeError(
             f"Nekohouse 未收录 creatorId `{creator_id_guess}`，无法解析 userId。"
             " 可直接传 pixiv userId 或 Pixiv 链接（/fanbox/creator/<userId>）。"
-            " 也可先用 /pixiv_fanbox_artist <关键词> 搜索。" + suggestion_block
+            " 也可先用 /aaF找 <关键词> 搜索。" + suggestion_block
         )
 
     async def _build_nekohouse_creator_message(
@@ -998,7 +998,7 @@ class FanboxHandler:
                 f"Nekohouse 未收录 creatorId `{creator_id_guess}`，无法解析 userId。"
                 " 请改用包含 userId 的 Pixiv 帖子链接："
                 " https://www.pixiv.net/fanbox/creator/<userId>/post/<postId>"
-                "；或先用 /pixiv_fanbox_artist <关键词> 搜索 userId。"
+                "；或先用 /aaF找 <关键词> 搜索 userId。"
             )
 
         raise RuntimeError("Nekohouse 模式需要可解析到 userId 的帖子链接。")
@@ -1046,7 +1046,7 @@ class FanboxHandler:
         if text.lower() == "help":
             help_text = get_help_message(
                 "pixiv_fanbox_recommended",
-                "用法: /pixiv_fanbox_recommended [数量]\n示例: /pixiv_fanbox_recommended 5",
+                "用法: /aaF荐 [数量]\n示例: /aaF荐 5",
             )
             yield event.plain_result(help_text)
             return
@@ -1167,8 +1167,7 @@ class FanboxHandler:
         if text.lower() == "help":
             help_text = get_help_message(
                 "pixiv_fanbox_artist",
-                "用法: /pixiv_fanbox_artist <关键词> [数量]\n"
-                "示例: /pixiv_fanbox_artist hannari 10",
+                "用法: /aaF找 <关键词> [数量]\n示例: /aaF找 hannari 10",
             )
             yield event.plain_result(help_text)
             return
@@ -1194,8 +1193,8 @@ class FanboxHandler:
         if not text or text.lower() == "help":
             help_text = get_help_message(
                 "pixiv_fanbox_creator",
-                "用法: /pixiv_fanbox_creator <creatorId|pixiv用户ID|链接> [数量]\n"
-                "示例: /pixiv_fanbox_creator harusono 5",
+                "用法: /aaF主 <creatorId|pixiv用户ID|链接> [数量]\n"
+                "示例: /aaF主 harusono 5",
             )
             yield event.plain_result(help_text)
             return
@@ -1355,8 +1354,7 @@ class FanboxHandler:
         if not text or text.lower() == "help":
             help_text = get_help_message(
                 "pixiv_fanbox_post",
-                "用法: /pixiv_fanbox_post <postId|帖子链接>\n"
-                "示例: /pixiv_fanbox_post 10451793",
+                "用法: /aaF帖 <postId|帖子链接>\n示例: /aaF帖 10451793",
             )
             yield event.plain_result(help_text)
             return
@@ -1464,7 +1462,7 @@ class FanboxHandler:
                 hint = (
                     "可能原因: Cloudflare 校验、帖子权限不足或 Fanbox 会话缺失。"
                     " 建议配置 fanbox_cookie(含 cf_clearance + FANBOXSESSID) 与 fanbox_user_agent。"
-                    " 可先用 /pixiv_fanbox_creator <creatorId> 查看可见帖子。"
+                    " 可先用 /aaF主 <creatorId> 查看可见帖子。"
                 )
                 if not self.pixiv_config.fanbox_sessid:
                     yield event.plain_result(
@@ -1495,7 +1493,7 @@ class FanboxHandler:
             hint = (
                 "可能原因: Cloudflare 校验、帖子权限不足或 Fanbox 会话缺失。"
                 " 建议配置 fanbox_cookie(含 cf_clearance + FANBOXSESSID) 与 fanbox_user_agent。"
-                " 可先用 /pixiv_fanbox_creator <creatorId> 查看可见帖子。"
+                " 可先用 /aaF主 <creatorId> 查看可见帖子。"
             )
             if fallback_error is not None:
                 hint += f"\nNekohouse 回退失败: {fallback_error}"

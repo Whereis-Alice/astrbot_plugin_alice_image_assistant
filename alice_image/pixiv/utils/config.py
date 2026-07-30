@@ -77,6 +77,8 @@ async def smart_clean_temp_dir(
 class PixivConfig:
     """Pixiv 插件配置管理类"""
 
+    MAX_RETURN_COUNT = 10
+
     def __init__(self, config: Dict[str, Any]):
         """初始化配置"""
         self.config = config
@@ -86,7 +88,9 @@ class PixivConfig:
         """加载配置项"""
         self.proxy = self.config.get("proxy", "").strip()
         self.refresh_token = self.config.get("refresh_token", None)
-        self.return_count = self.config.get("return_count", 1)
+        self.return_count = self._normalize_return_count(
+            self.config.get("return_count", 1)
+        )
         self.r18_mode = self.config.get("r18_mode", "过滤 R18")
         self.filter_r18g_only = self.config.get("filter_r18g_only", False)
         self.ai_filter_mode = self.config.get("ai_filter_mode", "过滤 AI 作品")
@@ -151,6 +155,20 @@ class PixivConfig:
         self.image_proxy_host = self.config.get("image_proxy_host", "i.pixiv.re")
         self.use_image_proxy = self.config.get("use_image_proxy", True)
         self.api_proxy_host = self.config.get("api_proxy_host", "").strip()
+
+    @classmethod
+    def _normalize_return_count(cls, value: Any, default: int = 1) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(1, min(parsed, cls.MAX_RETURN_COUNT))
+
+    def resolve_return_count(self, override: Any = None) -> int:
+        """Resolve a per-command count without mutating the saved default."""
+        if override is None:
+            return self.return_count
+        return self._normalize_return_count(override, self.return_count)
 
     def get_auth_error_message(self) -> str:
         """获取认证错误消息"""

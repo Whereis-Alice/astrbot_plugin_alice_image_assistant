@@ -258,7 +258,7 @@
     "hint": "支持 SauceNAO、Google Lens、Ascii2d，保留附图、回复图和等待下一张图的指令交互。",
     "items": {
       "enabled": {"type": "bool", "description": "启用以图搜图模块", "default": true},
-      "commands_enabled": {"type": "bool", "description": "启用 /爱图溯 指令", "default": true},
+      "commands_enabled": {"type": "bool", "description": "启用 /aa溯 指令", "default": true},
       "llm_tools_enabled": {"type": "bool", "description": "启用以图搜图 LLM 工具", "default": true},
       "inject_tool_guidance_enabled": {"type": "bool", "description": "向模型注入以图搜图工具提示", "default": true},
       "list_images_tool_enabled": {"type": "bool", "description": "启用会话图片列表工具", "default": true},

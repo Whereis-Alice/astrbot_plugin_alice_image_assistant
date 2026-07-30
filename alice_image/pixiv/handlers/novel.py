@@ -31,7 +31,7 @@ class NovelHandler:
         self.font_path = Path(__file__).parent / "data" / "SmileySans-Oblique.ttf"
 
     async def pixiv_novel(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv_novel 命令，搜索 Pixiv 小说"""
+        """处理 /aaP文 命令，搜索 Pixiv 小说"""
         cleaned_tags = tags.strip()
 
         # Handle help and empty cases
@@ -473,7 +473,7 @@ class NovelHandler:
             # 如果评论数量超过显示限制，提示用户
             if len(comments) > max_comments:
                 next_offset = (int(offset) if offset else 0) + max_comments
-                comment_info += f"\n已显示前 {max_comments} 条评论，使用 /pixiv_novel_comments {novel_id} {next_offset} 查看更多。"
+                comment_info += f"\n已显示前 {max_comments} 条评论，使用 /aaP文评 {novel_id} {next_offset} 查看更多。"
 
             yield event.plain_result(comment_info)
 
@@ -488,9 +488,7 @@ class NovelHandler:
         """根据ID下载Pixiv小说为pdf文件"""
         cleaned_id = novel_id.strip()
         if not cleaned_id or not cleaned_id.isdigit():
-            yield event.plain_result(
-                "请输入有效的小说ID。用法: /pixiv_novel_download <小说ID>"
-            )
+            yield event.plain_result("请输入有效的小说ID。用法: /aaP文下 <小说ID>")
             return
 
         if not await self.client_wrapper.authenticate():

@@ -16,6 +16,48 @@ from astrbot_plugin_alice_image_assistant.main import AliceImageAssistantPlugin
 
 
 class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pixiv_command_forwards_optional_count(self) -> None:
+        class _Pixiv:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def pixiv_search_illust(self, event, tags, return_count):
+                self.calls.append((event, tags, return_count))
+                yield "sent"
+
+        plugin = AliceImageAssistantPlugin.__new__(AliceImageAssistantPlugin)
+        plugin.find_config = {
+            "enabled": True,
+            "commands_enabled": True,
+            "pixiv": {
+                "enabled": True,
+                "features": {"illust_search": True},
+            },
+        }
+        plugin.pixiv = _Pixiv()
+        event = SimpleNamespace(
+            message_str="aaP 星之卡比 1",
+            plain_result=lambda text: text,
+        )
+
+        results = [result async for result in plugin.pixiv_search(event)]
+
+        self.assertEqual(results, ["sent"])
+        self.assertEqual(plugin.pixiv.calls, [(event, "星之卡比", 1)])
+
+    def test_reverse_wait_recognizes_only_the_new_command(self) -> None:
+        current = SimpleNamespace(
+            is_at_or_wake_command=True,
+            message_str="aa溯 google",
+        )
+        old = SimpleNamespace(
+            is_at_or_wake_command=True,
+            message_str="爱图溯 google",
+        )
+
+        self.assertTrue(AliceReverseController._is_search_command_event(current))
+        self.assertFalse(AliceReverseController._is_search_command_event(old))
+
     async def test_find_tool_progress_message_is_opt_in(self) -> None:
         class _Event:
             def __init__(self) -> None:

@@ -282,7 +282,7 @@ class AliceReverseController:
         if not event.is_at_or_wake_command:
             return False
         parts = event.message_str.strip().split(maxsplit=1)
-        return bool(parts) and parts[0] in {"爱图溯", "alice-r"}
+        return bool(parts) and parts[0] == "aa溯"
 
     def _cleanup_expired_image_waits_locked(self, now: float) -> None:
         """清理过期等待；调用方必须持有等待锁"""
@@ -515,7 +515,7 @@ class AliceReverseController:
                 {
                     "success": False,
                     "error": "无法获取有效的图片 URL",
-                    "hint": "请确保图片可访问，或让用户回复图片发送「爱图溯」命令",
+                    "hint": "请确保图片可访问，或让用户回复图片发送「aa溯」命令",
                 },
                 ensure_ascii=False,
             )

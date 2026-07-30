@@ -30,8 +30,8 @@ class AlicePixivController:
     AstrBot 插件，用于通过 Pixiv API 搜索插画。
     配置通过 AstrBot WebUI 进行管理。
     用法:
-        /pixiv <标签1>,<标签2>,...  搜索 Pixiv 插画
-        /pixiv help                 查看帮助信息
+        /aaP <标签1>,<标签2>,... [数量]  搜索 Pixiv 插画
+        /aaP帮助                         查看帮助信息
     可在配置中设置认证信息、返回数量和 R18 过滤模式。
     """
 
@@ -150,9 +150,16 @@ class AlicePixivController:
 
     # --------插画类
 
-    async def pixiv_search_illust(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv 命令，默认为标签搜索功能"""
-        async for result in self.illust_handler.pixiv_search_illust(event, tags):
+    async def pixiv_search_illust(
+        self,
+        event: AstrMessageEvent,
+        tags: str = "",
+        return_count: int | None = None,
+    ):
+        """处理 Pixiv 标签搜索，并支持单次覆盖返回作品数。"""
+        async for result in self.illust_handler.pixiv_search_illust(
+            event, tags, return_count
+        ):
             yield result
 
     async def pixiv_illust_new(
@@ -173,7 +180,7 @@ class AlicePixivController:
             yield result
 
     async def pixiv_and(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv_and 命令，进行 AND 逻辑深度搜索"""
+        """处理 /aaP并 命令，进行 AND 逻辑深度搜索"""
         async for result in self.illust_handler.pixiv_and(event, tags):
             yield result
 
@@ -203,7 +210,7 @@ class AlicePixivController:
     async def pixiv_deepsearch(self, event: AstrMessageEvent, tags: str):
         """
         深度搜索 Pixiv 插画，通过翻页获取多页结果
-        用法: /pixiv_deepsearch <标签1>,<标签2>,...
+        用法: /aaP深 <标签1>,<标签2>,...
         注意: 翻页深度由配置中的 deep_search_depth 参数控制
         """
         async for result in self.illust_handler.pixiv_deepsearch(event, tags):
@@ -247,7 +254,7 @@ class AlicePixivController:
     # --------小说类
 
     async def pixiv_novel(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /pixiv_novel 命令，搜索 Pixiv 小说"""
+        """处理 /aaP文 命令，搜索 Pixiv 小说"""
         async for result in self.novel_handler.pixiv_novel(event, tags):
             yield result
 
