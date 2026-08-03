@@ -1,7 +1,7 @@
 name: astrbot_plugin_alice_image_assistant
 display_name: 爱丽丝的图片助手
 desc: 让 Bot 自主精确找图、视觉挑图和以图搜图，同时保留完整短指令。
-version: v1.1.0
+version: v1.2.0
 author: Whereis-Alice
 repo: https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant
 astrbot_version: ">=4.16,<5"

@@ -149,6 +149,7 @@
               "user_search": {"type": "bool", "description": "画师搜索", "default": true},
               "user_detail": {"type": "bool", "description": "画师详情", "default": true},
               "user_illusts": {"type": "bool", "description": "画师作品", "default": true},
+              "artist_random": {"type": "bool", "description": "指定画师随机作品", "default": true},
               "artist_search": {"type": "bool", "description": "指定画师精确找图", "default": true},
               "novel_search": {"type": "bool", "description": "小说搜索", "default": true},
               "novel_recommended": {"type": "bool", "description": "推荐小说", "default": true},
@@ -186,6 +187,19 @@
               "fanbox_user_agent": {"type": "string", "description": "Fanbox User-Agent", "default": ""},
               "fanbox_data_source": {"type": "string", "description": "Fanbox 数据源", "options": ["auto", "official", "nekohouse"], "default": "auto"},
               "return_count": {"type": "int", "description": "指令默认返回作品数", "default": 1, "slider": {"min": 1, "max": 10, "step": 1}},
+              "artist_random_blocked_tags": {
+                "type": "list",
+                "description": "画师随机作品屏蔽标签",
+                "hint": "仅作用于 /aaP画师随。精确匹配 Pixiv 原始标签或翻译标签，不区分大小写。",
+                "default": []
+              },
+              "artist_random_pages": {
+                "type": "int",
+                "description": "画师随机作品池抓取页数",
+                "hint": "页数越多，随机范围越广，但请求时间也会增加。",
+                "default": 3,
+                "slider": {"min": 1, "max": 10, "step": 1}
+              },
               "r18_mode": {"type": "string", "description": "R18 过滤模式", "options": ["过滤 R18", "允许 R18", "仅 R18"], "default": "过滤 R18"},
               "filter_r18g_only": {"type": "bool", "description": "额外过滤 R18G", "default": false},
               "ai_filter_mode": {"type": "string", "description": "AI 作品过滤", "options": ["显示 AI 作品", "过滤 AI 作品", "仅 AI 作品"], "default": "显示 AI 作品"},

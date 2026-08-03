@@ -125,6 +125,29 @@ def _extract_tag_names(tags) -> List[str]:
     return [name] if name else []
 
 
+def item_has_any_exact_tag(item, target_tags) -> bool:
+    """Return whether an item has any configured tag name or translation."""
+    if isinstance(target_tags, str):
+        target_tags = [target_tags]
+    normalized_targets = {
+        str(tag).strip().casefold()
+        for tag in (target_tags or [])
+        if tag is not None and str(tag).strip()
+    }
+    if not normalized_targets:
+        return False
+
+    raw_tags = _get_value(item, "tags") or []
+    if not isinstance(raw_tags, (list, tuple, set)):
+        raw_tags = [raw_tags]
+
+    for tag in raw_tags:
+        names = (_extract_tag_name(tag), _extract_tag_translated_name(tag))
+        if any(name and name.casefold() in normalized_targets for name in names):
+            return True
+    return False
+
+
 def is_r18(item):
     """检查作品是否为R18内容（包含R18G）"""
     x_restrict = _to_int(_get_value(item, "x_restrict", "xRestrict"))

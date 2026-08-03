@@ -246,9 +246,28 @@ class AlicePixivController:
         async for result in self.user_handler.pixiv_user_detail(event, user_id):
             yield result
 
-    async def pixiv_user_illusts(self, event: AstrMessageEvent, user_id: str = ""):
+    async def pixiv_user_illusts(
+        self,
+        event: AstrMessageEvent,
+        user_id: str = "",
+        return_count: int | None = None,
+    ):
         """获取指定用户的作品"""
-        async for result in self.user_handler.pixiv_user_illusts(event, user_id):
+        async for result in self.user_handler.pixiv_user_illusts(
+            event, user_id, return_count
+        ):
+            yield result
+
+    async def pixiv_user_random(
+        self,
+        event: AstrMessageEvent,
+        user_id: str = "",
+        return_count: int | None = None,
+    ):
+        """随机获取指定画师的作品。"""
+        async for result in self.user_handler.pixiv_user_random(
+            event, user_id, return_count
+        ):
             yield result
 
     # --------小说类
@@ -314,6 +333,14 @@ class AlicePixivController:
         """生成并返回帮助信息"""
 
         help_text = get_help_message("pixiv_help", "帮助消息加载失败，请检查配置文件。")
+        help_text = help_text.replace(
+            "`/aaP画师作 <用户ID>`", "`/aaP画师作 <用户ID> [数量]`"
+        )
+        help_text += (
+            "\n\n## 画师随机作品\n"
+            "- `/aaP画师随 <用户ID> [数量]` - 从指定画师近期作品中随机获取，"
+            "并排除配置的屏蔽标签"
+        )
         yield event.plain_result(help_text)
 
     # ----随机搜索类

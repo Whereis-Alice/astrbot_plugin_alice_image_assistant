@@ -28,7 +28,7 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.2.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 
@@ -603,9 +603,36 @@ class AliceImageAssistantPlugin(Star):
             yield result
 
     @filter.command("aaP画师作")
-    async def pixiv_user_illusts(self, event: AstrMessageEvent, user_id: str = ""):
+    async def pixiv_user_illusts(self, event: AstrMessageEvent):
+        user_id, return_count, count_error = self._parse_query_count(
+            self._command_tail(event)
+        )
+        if count_error:
+            yield event.plain_result(count_error)
+            return
         async for result in self._pixiv_results(
-            event, "user_illusts", "pixiv_user_illusts", user_id
+            event,
+            "user_illusts",
+            "pixiv_user_illusts",
+            user_id,
+            return_count,
+        ):
+            yield result
+
+    @filter.command("aaP画师随")
+    async def pixiv_user_random(self, event: AstrMessageEvent):
+        user_id, return_count, count_error = self._parse_query_count(
+            self._command_tail(event)
+        )
+        if count_error:
+            yield event.plain_result(count_error)
+            return
+        async for result in self._pixiv_results(
+            event,
+            "artist_random",
+            "pixiv_user_random",
+            user_id,
+            return_count,
         ):
             yield result
 

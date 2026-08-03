@@ -144,6 +144,15 @@ class PixivConfig:
         self.random_sent_illust_retention_days = self.config.get(
             "random_sent_illust_retention_days", 7
         )
+        self.artist_random_blocked_tags = self._normalize_string_list(
+            self.config.get("artist_random_blocked_tags", [])
+        )
+        self.artist_random_pages = self._normalize_bounded_int(
+            self.config.get("artist_random_pages", 3),
+            default=3,
+            minimum=1,
+            maximum=10,
+        )
         self.fanbox_sessid = self.config.get("fanbox_sessid", "").strip()
         self.fanbox_cookie = self.config.get("fanbox_cookie", "").strip()
         self.fanbox_user_agent = self.config.get("fanbox_user_agent", "").strip()
@@ -169,6 +178,41 @@ class PixivConfig:
         if override is None:
             return self.return_count
         return self._normalize_return_count(override, self.return_count)
+
+    @staticmethod
+    def _normalize_string_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (list, tuple, set)):
+            values = value
+        else:
+            values = []
+        normalized = []
+        seen = set()
+        for item in values:
+            if item is None:
+                continue
+            cleaned = str(item).strip()
+            key = cleaned.casefold()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(cleaned)
+        return normalized
+
+    @staticmethod
+    def _normalize_bounded_int(
+        value: Any,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(parsed, maximum))
 
     def get_auth_error_message(self) -> str:
         """获取认证错误消息"""

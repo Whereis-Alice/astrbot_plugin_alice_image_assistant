@@ -45,6 +45,58 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results, ["sent"])
         self.assertEqual(plugin.pixiv.calls, [(event, "星之卡比", 1)])
 
+    async def test_artist_commands_forward_optional_count(self) -> None:
+        class _Pixiv:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def pixiv_user_illusts(self, event, user_id, return_count):
+                self.calls.append(("works", event, user_id, return_count))
+                yield "works-sent"
+
+            async def pixiv_user_random(self, event, user_id, return_count):
+                self.calls.append(("random", event, user_id, return_count))
+                yield "random-sent"
+
+        plugin = AliceImageAssistantPlugin.__new__(AliceImageAssistantPlugin)
+        plugin.find_config = {
+            "enabled": True,
+            "commands_enabled": True,
+            "pixiv": {
+                "enabled": True,
+                "features": {
+                    "user_illusts": True,
+                    "artist_random": True,
+                },
+            },
+        }
+        plugin.pixiv = _Pixiv()
+        works_event = SimpleNamespace(
+            message_str="aaP画师作 29872901 1",
+            plain_result=lambda text: text,
+        )
+        random_event = SimpleNamespace(
+            message_str="aaP画师随 29872901 2",
+            plain_result=lambda text: text,
+        )
+
+        works_results = [
+            result async for result in plugin.pixiv_user_illusts(works_event)
+        ]
+        random_results = [
+            result async for result in plugin.pixiv_user_random(random_event)
+        ]
+
+        self.assertEqual(works_results, ["works-sent"])
+        self.assertEqual(random_results, ["random-sent"])
+        self.assertEqual(
+            plugin.pixiv.calls,
+            [
+                ("works", works_event, "29872901", 1),
+                ("random", random_event, "29872901", 2),
+            ],
+        )
+
     def test_reverse_wait_recognizes_only_the_new_command(self) -> None:
         current = SimpleNamespace(
             is_at_or_wake_command=True,

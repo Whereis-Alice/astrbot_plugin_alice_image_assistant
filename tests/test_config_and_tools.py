@@ -4,6 +4,7 @@ import json
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from astrbot_plugin_alice_image_assistant.alice_image.config import NestedConfigProxy
 from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.config import (
@@ -11,6 +12,9 @@ from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.config import 
 )
 from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.help import (
     replace_public_command_names,
+)
+from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.tag import (
+    item_has_any_exact_tag,
 )
 from astrbot_plugin_alice_image_assistant.alice_image.tools import (
     AliceFindImageTool,
@@ -44,6 +48,7 @@ class ConfigAndToolTests(unittest.TestCase):
         features = schema["find_image"]["items"]["pixiv"]["items"]["features"]["items"]
         self.assertGreaterEqual(len(features), 30)
         self.assertIn("artist_search", features)
+        self.assertIn("artist_random", features)
         for name, item in features.items():
             with self.subTest(name=name):
                 self.assertEqual(item["type"], "bool")
@@ -73,6 +78,29 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertEqual(config.resolve_return_count(1), 1)
         self.assertEqual(config.return_count, 3)
         self.assertEqual(PixivConfig({"return_count": 99}).return_count, 10)
+
+    def test_artist_random_config_is_normalized(self) -> None:
+        config = PixivConfig(
+            {
+                "artist_random_blocked_tags": [" R-18 ", "r-18", None, "AI"],
+                "artist_random_pages": 99,
+            }
+        )
+
+        self.assertEqual(config.artist_random_blocked_tags, ["R-18", "AI"])
+        self.assertEqual(config.artist_random_pages, 10)
+
+    def test_artist_random_blocked_tags_match_exact_name_or_translation(self) -> None:
+        item = SimpleNamespace(
+            tags=[
+                SimpleNamespace(name="R-18", translated_name="成人向"),
+                {"name": "original", "translated_name": "原创"},
+            ]
+        )
+
+        self.assertTrue(item_has_any_exact_tag(item, ["r-18"]))
+        self.assertTrue(item_has_any_exact_tag(item, ["原创"]))
+        self.assertFalse(item_has_any_exact_tag(item, ["R-1"]))
 
     def test_llm_tool_names_and_schemas_are_unique(self) -> None:
         tools = [
