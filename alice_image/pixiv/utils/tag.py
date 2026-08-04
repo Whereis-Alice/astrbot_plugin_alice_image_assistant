@@ -3,9 +3,10 @@ tag.py
 统一Pixiv标签格式化、详情信息构建与R18/AI/互动阈值过滤工具模块
 """
 
-from dataclasses import dataclass
-from typing import List, Optional, Callable
 import random
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import List, Optional
 
 # R18 与 AI 敏感词列表
 R18_BADWORDS = [s.lower() for s in ["R-18", "R18", "R18+"]]
@@ -554,6 +555,7 @@ async def process_and_send_illusts(
     send_forward_message_func,
     is_novel=False,
     include_related_ids=False,
+    selection_func: Callable[[list, int], Awaitable[list]] | None = None,
 ):
     """
     统一处理作品过滤和发送的逻辑
@@ -567,6 +569,7 @@ async def process_and_send_illusts(
         send_pixiv_image_func: 发送图片的函数
         send_forward_message_func: 发送转发消息的函数
         is_novel: 是否为小说（默认为False）
+        selection_func: 可选的异步选图函数，用于随机化和近期去重
 
     Returns:
         AsyncGenerator:
@@ -608,8 +611,10 @@ async def process_and_send_illusts(
             yield _wrap_result(event.plain_result(no_result_msg), [])
             return
 
-        illusts_to_send = sample_illusts(
-            filtered_illusts, config.return_count, shuffle=True
+        illusts_to_send = (
+            await selection_func(filtered_illusts, config.return_count)
+            if selection_func
+            else sample_illusts(filtered_illusts, config.return_count, shuffle=True)
         )
         if not illusts_to_send:
             yield _wrap_result(
@@ -660,8 +665,10 @@ async def process_and_send_illusts(
         return
 
     # 随机选择作品
-    illusts_to_send = sample_illusts(
-        filtered_illusts, config.return_count, shuffle=True
+    illusts_to_send = (
+        await selection_func(filtered_illusts, config.return_count)
+        if selection_func
+        else sample_illusts(filtered_illusts, config.return_count, shuffle=True)
     )
 
     if not illusts_to_send:
@@ -834,6 +841,7 @@ async def process_and_send_illusts_sorted(
     send_pixiv_image_func,
     send_forward_message_func,
     is_novel=False,
+    selection_func: Callable[[list, int], Awaitable[list]] | None = None,
 ):
     """
     处理已排序的作品列表并发送
@@ -853,7 +861,11 @@ async def process_and_send_illusts_sorted(
             return
 
         count_to_send = min(len(filtered_illusts), config.return_count)
-        illusts_to_send = filtered_illusts[:count_to_send]
+        illusts_to_send = (
+            await selection_func(filtered_illusts, count_to_send)
+            if selection_func
+            else filtered_illusts[:count_to_send]
+        )
         if not illusts_to_send:
             yield event.plain_result("筛选后没有符合条件的作品可发送。")
             return
@@ -887,7 +899,11 @@ async def process_and_send_illusts_sorted(
         return
 
     count_to_send = min(len(filtered_illusts), config.return_count)
-    illusts_to_send = filtered_illusts[:count_to_send]
+    illusts_to_send = (
+        await selection_func(filtered_illusts, count_to_send)
+        if selection_func
+        else filtered_illusts[:count_to_send]
+    )
 
     if not illusts_to_send:
         return

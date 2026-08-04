@@ -187,6 +187,24 @@
               "fanbox_user_agent": {"type": "string", "description": "Fanbox User-Agent", "default": ""},
               "fanbox_data_source": {"type": "string", "description": "Fanbox 数据源", "options": ["auto", "official", "nekohouse"], "default": "auto"},
               "return_count": {"type": "int", "description": "指令默认返回作品数", "default": 1, "slider": {"min": 1, "max": 10, "step": 1}},
+              "randomize_search_results": {
+                "type": "bool",
+                "description": "随机抽取 Pixiv 搜索结果",
+                "hint": "默认开启。除作品 ID 和链接直取外，多候选搜索会先打散作品池；启用 LLM 审核时仍会从随机候选中挑选最符合描述的作品。",
+                "default": true
+              },
+              "recent_dedup_enabled": {
+                "type": "bool",
+                "description": "避免近期重复发送同一 Pixiv 作品",
+                "hint": "按群聊或私聊分别记录。候选全部发过时会自动允许复用旧作品，避免无图可发。",
+                "default": true
+              },
+              "recent_dedup_retention_days": {
+                "type": "int",
+                "description": "近期作品去重保留天数",
+                "default": 7,
+                "slider": {"min": 1, "max": 90, "step": 1}
+              },
               "artist_random_blocked_tags": {
                 "type": "list",
                 "description": "画师随机作品屏蔽标签",

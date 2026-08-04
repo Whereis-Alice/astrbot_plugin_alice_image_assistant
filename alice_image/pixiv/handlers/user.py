@@ -22,10 +22,16 @@ class UserHandler:
     负责处理用户搜索、用户详情和用户作品获取功能
     """
 
-    def __init__(self, client_wrapper, pixiv_config):
+    def __init__(self, client_wrapper, pixiv_config, selection_policy=None):
         self.client_wrapper = client_wrapper
         self.client = client_wrapper.client_api
         self.pixiv_config = pixiv_config
+        self.selection_policy = selection_policy
+
+    def _selection_callback(self, event: AstrMessageEvent):
+        if self.selection_policy is None:
+            return None
+        return self.selection_policy.callback(event)
 
     async def _get_user_name(self, user_id: int) -> str:
         try:
@@ -312,6 +318,7 @@ class UserHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -388,6 +395,7 @@ class UserHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
         except Exception as e:

@@ -585,17 +585,45 @@ class PixivForwardSearchService:
                 artist_account=artist_target.account if artist_target else "",
             )
 
-        selected = filtered[:count]
-        review_fallback = False
-        if review_enabled and description.strip() and len(filtered) > 1:
-            selected, review_fallback, error = await self._review(
+        selection_policy = getattr(self.controller, "selection_policy", None)
+        candidates = filtered
+        if selection_policy is not None:
+            candidates = await selection_policy.select(
                 event,
                 filtered,
+                len(filtered),
+                remember=False,
+                fill_from_history=False,
+            )
+
+        selected = candidates[:count]
+        review_fallback = False
+        if review_enabled and description.strip() and len(candidates) > 1:
+            selected, review_fallback, error = await self._review(
+                event,
+                candidates,
                 description.strip(),
                 count,
             )
             if error:
                 return PixivForwardResult(error=error)
+
+        selected_ids = {getattr(item, "id", None) for item in selected}
+        ordered_candidates = selected + [
+            item
+            for item in candidates
+            if getattr(item, "id", None) not in selected_ids
+        ]
+        if selection_policy is not None:
+            selected = await selection_policy.select(
+                event,
+                ordered_candidates,
+                count,
+                randomize=False,
+                remember=send_images,
+            )
+        else:
+            selected = ordered_candidates[:count]
 
         ids = [int(item.id) for item in selected if getattr(item, "id", None)]
         if not send_images:

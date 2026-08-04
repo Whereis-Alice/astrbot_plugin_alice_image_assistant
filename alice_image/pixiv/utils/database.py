@@ -54,6 +54,17 @@ class SentIllust(BaseModel):
         primary_key = pw.CompositeKey("illust_id", "chat_id")
 
 
+class RecentSentIllust(BaseModel):
+    """Conversation-scoped history for interactive Pixiv result deduplication."""
+
+    illust_id = pw.BigIntegerField()
+    scope_id = pw.TextField()
+    sent_at = pw.DateTimeField(index=True)
+
+    class Meta:
+        primary_key = pw.CompositeKey("illust_id", "scope_id")
+
+
 class RandomRankingConfig(BaseModel):
     """随机排行榜配置模型"""
 
@@ -159,6 +170,10 @@ def initialize_database():
         if not SentIllust.table_exists():
             db.create_tables([SentIllust])
             logger.info("数据库初始化成功，数据表 sent_illust 已创建。")
+
+        if not RecentSentIllust.table_exists():
+            db.create_tables([RecentSentIllust])
+            logger.info("数据库初始化成功，数据表 recent_sent_illust 已创建。")
 
         if not RandomSearchSchedule.table_exists():
             db.create_tables([RandomSearchSchedule])
@@ -480,6 +495,78 @@ def filter_sent_illusts(illusts, chat_id: str) -> list:
     except Exception as e:
         logger.error(f"过滤已发送作品失败: {e}")
         return illusts  # 出错时返回原列表
+
+
+def add_recent_sent_illusts(illust_ids, scope_id: str) -> None:
+    """Record interactive results and refresh timestamps for repeated IDs."""
+    normalized_ids = set()
+    for illust_id in illust_ids:
+        try:
+            normalized_ids.add(int(illust_id))
+        except (TypeError, ValueError):
+            continue
+    if not normalized_ids or not scope_id:
+        return
+
+    try:
+        now = datetime.now()
+        with db.atomic():
+            for illust_id in normalized_ids:
+                (
+                    RecentSentIllust.insert(
+                        illust_id=illust_id,
+                        scope_id=scope_id,
+                        sent_at=now,
+                    )
+                    .on_conflict_replace()
+                    .execute()
+                )
+    except Exception as e:
+        logger.error(f"添加近期 Pixiv 发送记录失败: {e}")
+
+
+def get_recent_sent_illust_history(
+    scope_id: str,
+    days: int = 7,
+) -> dict[int, datetime]:
+    """Return recent IDs and their last send time for one conversation."""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=max(1, int(days)))
+        return {
+            int(record.illust_id): record.sent_at
+            for record in RecentSentIllust.select(
+                RecentSentIllust.illust_id,
+                RecentSentIllust.sent_at,
+            ).where(
+                (RecentSentIllust.scope_id == scope_id)
+                & (RecentSentIllust.sent_at >= cutoff_date)
+            )
+        }
+    except Exception as e:
+        logger.error(f"读取近期 Pixiv 发送记录失败: {e}")
+        return {}
+
+
+def get_recent_sent_illust_ids(scope_id: str, days: int = 7) -> set[int]:
+    """Return IDs sent in one conversation during the configured window."""
+    return set(get_recent_sent_illust_history(scope_id, days))
+
+
+def cleanup_old_recent_sent_illusts(days: int = 7) -> None:
+    """Remove expired interactive deduplication records."""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=max(1, int(days)))
+        deleted_count = (
+            RecentSentIllust.delete()
+            .where(RecentSentIllust.sent_at < cutoff_date)
+            .execute()
+        )
+        if deleted_count > 0:
+            logger.info(
+                f"清理了 {deleted_count} 条过期的近期 Pixiv 发送记录"
+            )
+    except Exception as e:
+        logger.error(f"清理近期 Pixiv 发送记录失败: {e}")
 
 
 def get_schedule_time(chat_id: str) -> datetime:

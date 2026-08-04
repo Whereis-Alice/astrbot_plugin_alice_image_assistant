@@ -28,7 +28,7 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 

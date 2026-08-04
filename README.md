@@ -121,6 +121,7 @@ python -m playwright install chromium
 - `llm_review`：控制视觉审核、审核模型、失败时放行或触发回退、候选数量；`fail_open` 对 Pixiv、搜图神器和 SerpApi 三个来源统一生效。
 - `pixiv`：有模块总开关、各项功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。
 - `pixiv.settings.return_count`：Pixiv 指令默认返回作品数。`/aaP`、`/aaP画师作` 和 `/aaP画师随` 末尾的数量可只覆盖本次调用，不会修改配置。
+- `pixiv.settings.randomize_search_results`：默认随机抽取多候选 Pixiv 结果；`recent_dedup_enabled` 会按群聊或私聊避开近期已发作品。作品 ID 和链接直取不受影响，候选全部用完时会自动复用旧作品。
 - `pixiv.settings.artist_random_blocked_tags`：仅用于 `/aaP画师随`，精确屏蔽带有指定原始标签或翻译标签的作品；`artist_random_pages` 控制随机作品池页数。
 - `soutu`：可分别关主图源、Bing 补充和视觉挑图。关闭 `enabled` 后不会启动 Playwright 抓取。
 - `serpapi`：仅包含文字搜图；填写 `serpapi_keys` 后可轮询多个 Key，并可独立关闭 `vlm_selection_enabled` 视觉淘汰赛。
@@ -233,6 +234,7 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 |---|---|
 | 搜图神器没有结果 | 执行 `python -m playwright install chromium`，检查网络；也可启用 Bing 补充或开启 SerpApi 回退。 |
 | Pixiv 认证失败 | 检查 `refresh_token`、代理和反代设置；不要把 Token 贴到群聊。 |
+| Pixiv 总是发同一张图 | 保持 `randomize_search_results` 和 `recent_dedup_enabled` 开启；需要更长记忆时提高 `recent_dedup_retention_days`。 |
 | 视觉审核回退到首图 | 当前模型不支持图片、审核超时或候选下载失败。可换视觉模型，或关闭 `fail_open` 让插件改用下一个来源。 |
 | Ascii2d 403 | 重新获取 Cookie，必要时使用代理。 |
 | 无法反搜本地图片 | 在隐私风险可接受时开启图片上传；需要读取服务器路径时还必须单独开启本地文件访问。 |

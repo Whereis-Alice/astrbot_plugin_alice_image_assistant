@@ -11,6 +11,7 @@ from .utils.subscription import SubscriptionService
 from .utils.pixiv_utils import init_pixiv_utils
 from .utils.help import init_help_manager, get_help_message
 from .utils.llm_tool import create_pixiv_llm_tools
+from .utils.selection import PixivSelectionPolicy
 from .utils.tag import set_filter_config_source
 
 from .utils.config import PixivConfig, PixivConfigManager
@@ -54,10 +55,19 @@ class AlicePixivController:
         # 2. 初始化核心客户端 (Facade 持有核心组件)
         self.client_wrapper = PixivClientWrapper(self.pixiv_config)
         self.client = self.client_wrapper.client_api
+        self.selection_policy = PixivSelectionPolicy(self.pixiv_config)
 
         # 3. 初始化各个子系统 (Handlers)，把工具给它们
-        self.illust_handler = IllustHandler(self.client_wrapper, self.pixiv_config)
-        self.user_handler = UserHandler(self.client_wrapper, self.pixiv_config)
+        self.illust_handler = IllustHandler(
+            self.client_wrapper,
+            self.pixiv_config,
+            self.selection_policy,
+        )
+        self.user_handler = UserHandler(
+            self.client_wrapper,
+            self.pixiv_config,
+            self.selection_policy,
+        )
         self.novel_handler = NovelHandler(self.client_wrapper, self.pixiv_config)
         self.subscribe_handler = SubscribeHandler(
             self.client_wrapper, self.pixiv_config
@@ -144,7 +154,7 @@ class AlicePixivController:
             "name": "alice_image_pixiv",
             "author": "Huli3",
             "description": "爱丽丝图片助手的 Pixiv 模块",
-            "version": "1.0.0",
+            "version": "1.3.0",
             "homepage": "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant",
         }
 

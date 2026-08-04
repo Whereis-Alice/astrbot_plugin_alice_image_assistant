@@ -17,7 +17,7 @@ from ..utils.url import extract_pixiv_artwork_id
 
 
 class IllustHandler:
-    def __init__(self, client_wrapper, pixiv_config):
+    def __init__(self, client_wrapper, pixiv_config, selection_policy=None):
         """
         初始化插画处理器
         :param client_wrapper: 封装好的 PixivClientWrapper 实例 (Core)
@@ -27,6 +27,12 @@ class IllustHandler:
         self.client_wrapper = client_wrapper
         self.client = client_wrapper.client_api
         self.pixiv_config = pixiv_config
+        self.selection_policy = selection_policy
+
+    def _selection_callback(self, event: AstrMessageEvent):
+        if self.selection_policy is None:
+            return None
+        return self.selection_policy.callback(event)
 
     async def pixiv_msg_url(self, event: AstrMessageEvent, msg: str = ""):
         """识别消息中的 Pixiv 作品链接并发送对应作品。"""
@@ -125,6 +131,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -215,6 +222,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -269,6 +277,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -458,6 +467,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -685,6 +695,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -749,6 +760,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -905,6 +917,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 
@@ -1489,6 +1502,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
+                selection_func=self._selection_callback(event),
             ):
                 yield result
 

@@ -144,6 +144,18 @@ class PixivConfig:
         self.random_sent_illust_retention_days = self.config.get(
             "random_sent_illust_retention_days", 7
         )
+        self.randomize_search_results = bool(
+            self.config.get("randomize_search_results", True)
+        )
+        self.recent_dedup_enabled = bool(
+            self.config.get("recent_dedup_enabled", True)
+        )
+        self.recent_dedup_retention_days = self._normalize_bounded_int(
+            self.config.get("recent_dedup_retention_days", 7),
+            default=7,
+            minimum=1,
+            maximum=90,
+        )
         self.artist_random_blocked_tags = self._normalize_string_list(
             self.config.get("artist_random_blocked_tags", [])
         )
@@ -284,6 +296,9 @@ class PixivConfigManager:
             "min_views": {"type": "int", "min": 0, "max": 100000000},
             "min_likes": {"type": "int", "min": 0, "max": 100000000},
             "return_count": {"type": "int", "min": 1, "max": 30},
+            "randomize_search_results": {"type": "bool"},
+            "recent_dedup_enabled": {"type": "bool"},
+            "recent_dedup_retention_days": {"type": "int", "min": 1, "max": 90},
             "show_filter_result": {"type": "bool"},
             "single_response_mode": {"type": "bool"},
             "show_details": {"type": "bool"},
@@ -342,6 +357,9 @@ class PixivConfigManager:
         # 只显示用户常用的配置项，隐藏敏感和不常用的配置
         display_keys = [
             "return_count",
+            "randomize_search_results",
+            "recent_dedup_enabled",
+            "recent_dedup_retention_days",
             "r18_mode",
             "filter_r18g_only",
             "ai_filter_mode",

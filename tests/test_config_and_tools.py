@@ -90,6 +90,22 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertEqual(config.artist_random_blocked_tags, ["R-18", "AI"])
         self.assertEqual(config.artist_random_pages, 10)
 
+    def test_pixiv_search_selection_defaults_and_bounds(self) -> None:
+        default_config = PixivConfig({})
+        bounded_config = PixivConfig({"recent_dedup_retention_days": 999})
+
+        self.assertTrue(default_config.randomize_search_results)
+        self.assertTrue(default_config.recent_dedup_enabled)
+        self.assertEqual(default_config.recent_dedup_retention_days, 7)
+        self.assertEqual(bounded_config.recent_dedup_retention_days, 90)
+
+        schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
+        settings = schema["find_image"]["items"]["pixiv"]["items"]["settings"][
+            "items"
+        ]
+        self.assertTrue(settings["randomize_search_results"]["default"])
+        self.assertTrue(settings["recent_dedup_enabled"]["default"])
+
     def test_artist_random_blocked_tags_match_exact_name_or_translation(self) -> None:
         item = SimpleNamespace(
             tags=[
