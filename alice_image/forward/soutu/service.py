@@ -1,37 +1,67 @@
 # -*- coding: utf-8 -*-
-import io
+"""?????????????????"""
+
+from __future__ import annotations
+
 import asyncio
-from typing import Optional, List, Tuple
+import io
+from dataclasses import dataclass
+from typing import Optional
 
 from PIL import Image, UnidentifiedImageError
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.star import Context
-from astrbot.api.provider import Provider
 from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.provider import Provider
+from astrbot.api.star import Context
 
-from .scraper import ScraperManager
+from ..review import ReviewStatus
 from .composer import ComposerManager
+from .scraper import ScraperManager
 from .vlm import select_best_image_index
 
 JPEG_QUALITY = 85
 
 
+@dataclass(slots=True)
+class SoutuForwardResult:
+    image_bytes: bytes | None = None
+    image_url: str = ""
+    error: str = ""
+    review_fallback: bool = False
+    review_status: ReviewStatus = ReviewStatus.NOT_RUN
+    reviewed_count: int = 0
+
+    def __iter__(self):
+        """Keep compatibility with the pre-1.4 tuple return contract."""
+        yield self.image_bytes
+        yield self.error
+        yield self.review_fallback
+
+
 class SoutuSearchService:
-    def __init__(self, context: Context, config: dict = None):
+    def __init__(self, context: Context, config: dict | None = None):
         self.context = context
         self.config = config or {}
-
         self.scraper_mgr = ScraperManager()
         self.composer_mgr = ComposerManager()
         self._vlm_semaphore = asyncio.Semaphore(2)
 
-    async def terminate(self):
+    async def terminate(self) -> None:
         await self.scraper_mgr.close_all()
         await self.composer_mgr.close_all()
-        logger.info("SouTuShenQi 插件资源回收完成。")
+        logger.info("SouTuShenQi ?????????")
+
+    def _bounded_int(
+        self, key: str, default: int, minimum: int, maximum: int
+    ) -> int:
+        try:
+            value = int(self.config.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
 
     async def _get_vlm_provider(self, event: AstrMessageEvent) -> Optional[Provider]:
-        provider_id = self.config.get("vlm_provider_id", "")
+        provider_id = str(self.config.get("vlm_provider_id") or "").strip()
         if provider_id:
             provider = self.context.get_provider_by_id(provider_id)
             if provider:
@@ -44,12 +74,11 @@ class SoutuSearchService:
                 provider = self.context.get_provider_by_id(curr_id)
                 if provider:
                     return provider
-
         return None
 
     def _validate_and_hash_sync(
         self, img_bytes: bytes, min_res: int
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         try:
             with Image.open(io.BytesIO(img_bytes)) as img:
                 if img.width < min_res or img.height < min_res:
@@ -57,122 +86,93 @@ class SoutuSearchService:
                 img = img.convert("L").resize((8, 8), Image.Resampling.LANCZOS)
                 pixels = list(img.getdata())
                 avg = sum(pixels) / len(pixels)
-                bits = "".join(["1" if p > avg else "0" for p in pixels])
+                bits = "".join("1" if pixel > avg else "0" for pixel in pixels)
                 return True, hex(int(bits, 2))[2:].zfill(16)
         except Exception:
             return False, ""
 
-    async def _ensure_minimum_images(self, keyword: str) -> List[Tuple[str, bytes]]:
-        try:
-            raw_count = self.config.get("batch_size", 9)
-            target_count = max(1, min(int(raw_count), 16))
-        except (TypeError, ValueError):
-            target_count = 9
-
-        try:
-            raw_res = self.config.get("min_resolution", 500)
-            min_resolution = max(100, min(int(raw_res), 4000))
-        except (TypeError, ValueError):
-            min_resolution = 500
-
-        valid_items = []
-        seen_hashes = set()
+    async def _download_valid_batch(
+        self,
+        url_pool: list[str],
+        target_count: int,
+        min_resolution: int,
+        seen_hashes: set[str],
+    ) -> list[tuple[str, bytes]]:
+        valid_items: list[tuple[str, bytes]] = []
         loop = asyncio.get_running_loop()
-
-        urls: list[str] = []
-        if self.config.get("primary_source_enabled", True):
-            urls, _ = await self.scraper_mgr.fetch_image_urls(keyword, target_count * 4)
-        url_pool = urls.copy() if urls else []
 
         while url_pool and len(valid_items) < target_count:
             needed = target_count - len(valid_items)
-            batch_size = min(len(url_pool), max(needed, needed * 2))
-
-            batch_urls = url_pool[:batch_size]
-            url_pool = url_pool[batch_size:]
-
+            download_count = min(len(url_pool), max(needed, needed * 2))
+            batch_urls = url_pool[:download_count]
+            del url_pool[:download_count]
             downloaded = await self.composer_mgr.download_image_batch(
                 batch_urls, target_count=len(batch_urls)
             )
-
             for url, img_bytes in downloaded:
                 if len(valid_items) >= target_count:
                     break
-                is_valid, b_hash = await loop.run_in_executor(
-                    None, self._validate_and_hash_sync, img_bytes, min_resolution
+                is_valid, image_hash = await loop.run_in_executor(
+                    None,
+                    self._validate_and_hash_sync,
+                    img_bytes,
+                    min_resolution,
                 )
-                if is_valid and b_hash not in seen_hashes:
+                if is_valid and image_hash not in seen_hashes:
                     valid_items.append((url, img_bytes))
-                    seen_hashes.add(b_hash)
+                    seen_hashes.add(image_hash)
+        return valid_items
 
-        logger.info(f"主图源处理完毕，当前高清去重有效图片数: {len(valid_items)}")
-
-        if len(valid_items) < target_count and self.config.get(
-            "bing_fallback_enabled", True
-        ):
-            bing_urls = await self.scraper_mgr.fetch_bing_image_urls(
-                keyword, target_count * 3
+    async def _collect_url_pools(
+        self, keyword: str, total_target: int
+    ) -> tuple[list[str], list[str], str]:
+        primary_urls: list[str] = []
+        primary_error = ""
+        if self.config.get("primary_source_enabled", True):
+            primary_urls, primary_error = await self.scraper_mgr.fetch_image_urls(
+                keyword, total_target * 4
             )
-            bing_pool = bing_urls.copy() if bing_urls else []
 
-            while bing_pool and len(valid_items) < target_count:
-                needed = target_count - len(valid_items)
-                batch_size = min(len(bing_pool), max(needed, needed * 2))
+        return list(primary_urls), [], primary_error
 
-                batch_urls = bing_pool[:batch_size]
-                bing_pool = bing_pool[batch_size:]
-
-                bing_dl = await self.composer_mgr.download_image_batch(
-                    batch_urls, target_count=len(batch_urls)
-                )
-                for url, img_bytes in bing_dl:
-                    if len(valid_items) >= target_count:
-                        break
-                    is_valid, b_hash = await loop.run_in_executor(
-                        None, self._validate_and_hash_sync, img_bytes, min_resolution
-                    )
-                    if is_valid and b_hash not in seen_hashes:
-                        valid_items.append((url, img_bytes))
-                        seen_hashes.add(b_hash)
-
-            logger.info(f"Bing 补充处理完毕，当前高清有效图片数: {len(valid_items)}")
-
-        return valid_items[:target_count]
+    async def _ensure_bing_pool(
+        self,
+        keyword: str,
+        total_target: int,
+        bing_pool: list[str],
+        bing_loaded: bool,
+    ) -> bool:
+        if bing_loaded or not self.config.get("bing_fallback_enabled", True):
+            return bing_loaded
+        bing_pool.extend(
+            await self.scraper_mgr.fetch_bing_image_urls(keyword, total_target * 3)
+        )
+        return True
 
     async def _vlm_selection(
-        self, event: AstrMessageEvent, items: List[Tuple[str, bytes]], eval_desc: str
-    ) -> Tuple[str, bytes, str, bool]:
+        self,
+        provider: Provider,
+        items: list[tuple[str, bytes]],
+        eval_desc: str,
+    ) -> tuple[ReviewStatus, str, bytes, str]:
         collage_bytes, valid_items = await self.composer_mgr.create_collage_from_items(
             items
         )
         if not collage_bytes or not valid_items:
-            return "", b"", "图像组合处理失败，候选数据损坏。", False
+            return ReviewStatus.ERROR, "", b"", "????????????????"
 
-        vlm_provider = await self._get_vlm_provider(event)
-        if vlm_provider:
-            async with self._vlm_semaphore:
-                best_idx = await select_best_image_index(
-                    vlm_provider, collage_bytes, eval_desc, len(valid_items)
-                )
+        async with self._vlm_semaphore:
+            best_idx = await select_best_image_index(
+                provider, collage_bytes, eval_desc, len(valid_items)
+            )
 
-            # 🌟 修复魔法数字重载：明确区分拒绝(-1)和异常崩溃(-2)
-            if best_idx in (-1, -2):
-                if best_idx == -1:
-                    logger.info(
-                        "VLM 判定候选图均未完美匹配描述，触发软回退，默认下发首张有效候选图。"
-                    )
-                else:
-                    logger.warning(
-                        "VLM 调用异常或超出重试限制，触发软回退，默认下发首张有效候选图。"
-                    )
-                final_url, final_bytes = valid_items[0]
-                return final_url, final_bytes, "", True
+        if best_idx == -1:
+            return ReviewStatus.NO_MATCH, "", b"", ""
+        if best_idx == -2 or not 0 <= best_idx < len(valid_items):
+            return ReviewStatus.ERROR, "", b"", "??????????????"
 
-            final_url, final_bytes = valid_items[best_idx]
-            return final_url, final_bytes, "", False
-        else:
-            logger.info("VLM 模型未配置或获取失败，自动降级为首张有效候选图。")
-            return valid_items[0][0], valid_items[0][1], "", True
+        final_url, final_bytes = valid_items[best_idx]
+        return ReviewStatus.MATCHED, final_url, final_bytes, ""
 
     def _format_image_sync(self, img_bytes: bytes) -> bytes:
         try:
@@ -211,24 +211,160 @@ class SoutuSearchService:
         keyword: str,
         description: str = "",
         use_vlm_selection: bool = True,
-    ) -> Tuple[Optional[bytes], str, bool]:
-        eval_desc = description if description else keyword
-        items = await self._ensure_minimum_images(keyword)
+        strict_match_enabled: bool = True,
+    ) -> SoutuForwardResult:
+        eval_desc = description.strip() or keyword
+        batch_size = self._bounded_int("batch_size", 9, 1, 16)
+        review_rounds = self._bounded_int("review_rounds", 3, 1, 6)
+        min_resolution = self._bounded_int("min_resolution", 500, 100, 4000)
+        total_target = batch_size * (review_rounds if use_vlm_selection else 1)
+        primary_pool, bing_pool, primary_error = await self._collect_url_pools(
+            keyword, total_target
+        )
+        seen_hashes: set[str] = set()
+        bing_loaded = False
 
-        if not items:
-            return None, "未找到符合分辨率要求且可访问的图像资源。", False
+        async def next_batch(prefer_bing: bool = False) -> list[tuple[str, bytes]]:
+            nonlocal bing_loaded
+            first_pool = primary_pool
+            second_pool = bing_pool
+            if prefer_bing and self.config.get("bing_fallback_enabled", True):
+                bing_loaded = await self._ensure_bing_pool(
+                    keyword,
+                    total_target,
+                    bing_pool,
+                    bing_loaded,
+                )
+                first_pool, second_pool = bing_pool, primary_pool
 
-        final_bytes = b""
-        is_fallback = False
-
-        if use_vlm_selection and len(items) > 1:
-            _, final_bytes, err_msg, is_fallback = await self._vlm_selection(
-                event, items, eval_desc
+            items = await self._download_valid_batch(
+                first_pool, batch_size, min_resolution, seen_hashes
             )
-            if not final_bytes:
-                return None, err_msg, False
-        else:
-            _, final_bytes = items[0]
+            if len(items) < batch_size:
+                if second_pool is bing_pool:
+                    bing_loaded = await self._ensure_bing_pool(
+                        keyword,
+                        total_target,
+                        bing_pool,
+                        bing_loaded,
+                    )
+                items.extend(
+                    await self._download_valid_batch(
+                        second_pool,
+                        batch_size - len(items),
+                        min_resolution,
+                        seen_hashes,
+                    )
+                )
+            return items
 
-        final_bytes = await self._format_image(final_bytes)
-        return final_bytes, "", is_fallback
+        if not use_vlm_selection:
+            items = await next_batch()
+            if not items:
+                return SoutuForwardResult(
+                    error=primary_error
+                    or "????????????????????"
+                )
+            image_url, image_bytes = items[0]
+            return SoutuForwardResult(
+                image_bytes=await self._format_image(image_bytes),
+                image_url=image_url,
+            )
+
+        provider = await self._get_vlm_provider(event)
+        if provider is None:
+            items = await next_batch()
+            if not items:
+                return SoutuForwardResult(
+                    error=primary_error
+                    or "????????????????????",
+                    review_status=ReviewStatus.ERROR,
+                )
+            image_url, image_bytes = items[0]
+            logger.warning("?????????????????????? fail_open ???")
+            return SoutuForwardResult(
+                image_bytes=await self._format_image(image_bytes),
+                image_url=image_url,
+                review_fallback=True,
+                review_status=ReviewStatus.ERROR,
+                reviewed_count=len(items),
+            )
+
+        reviewed_count = 0
+        first_candidate: tuple[str, bytes] | None = None
+        for round_index in range(1, review_rounds + 1):
+            items = await next_batch(prefer_bing=round_index > 1)
+            if not items:
+                break
+            if first_candidate is None:
+                first_candidate = items[0]
+
+            reviewed_count += len(items)
+            logger.info(
+                "??????? %s/%s ???????? %s ????",
+                round_index,
+                review_rounds,
+                len(items),
+            )
+            status, image_url, image_bytes, error = await self._vlm_selection(
+                provider, items, eval_desc
+            )
+            if status is ReviewStatus.MATCHED:
+                logger.info(
+                    "????? %s ???????????? %s ????",
+                    round_index,
+                    reviewed_count,
+                )
+                return SoutuForwardResult(
+                    image_bytes=await self._format_image(image_bytes),
+                    image_url=image_url,
+                    review_status=status,
+                    reviewed_count=reviewed_count,
+                )
+            if status is ReviewStatus.ERROR:
+                fallback_url, fallback_bytes = items[0]
+                logger.warning(
+                    "??????????????????????? fail_open ???%s",
+                    error,
+                )
+                return SoutuForwardResult(
+                    image_bytes=await self._format_image(fallback_bytes),
+                    image_url=fallback_url,
+                    error=error,
+                    review_fallback=True,
+                    review_status=status,
+                    reviewed_count=reviewed_count,
+                )
+
+            logger.info(
+                "????? %s ?????????????????",
+                round_index,
+            )
+
+        if reviewed_count:
+            if not strict_match_enabled and first_candidate is not None:
+                image_url, image_bytes = first_candidate
+                logger.warning(
+                    "??????????????????????????????"
+                )
+                return SoutuForwardResult(
+                    image_bytes=await self._format_image(image_bytes),
+                    image_url=image_url,
+                    review_fallback=True,
+                    review_status=ReviewStatus.NO_MATCH,
+                    reviewed_count=reviewed_count,
+                )
+            logger.info(
+                "???????? %s ???????????????????",
+                reviewed_count,
+            )
+            return SoutuForwardResult(
+                error=f"??????? {reviewed_count} ????????????",
+                review_fallback=True,
+                review_status=ReviewStatus.NO_MATCH,
+                reviewed_count=reviewed_count,
+            )
+
+        return SoutuForwardResult(
+            error=primary_error or "????????????????????"
+        )

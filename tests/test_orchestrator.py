@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from astrbot_plugin_alice_image_assistant.alice_image.forward.orchestrator import (
     ForwardSearchOrchestrator,
 )
+from astrbot_plugin_alice_image_assistant.alice_image.forward.review import ReviewStatus
 
 
 class _Event:
@@ -56,16 +57,25 @@ class _Pixiv:
 
 
 class _Soutu:
-    def __init__(self, success: bool, review_fallback: bool = False) -> None:
+    def __init__(
+        self,
+        success: bool,
+        review_fallback: bool = False,
+        review_status: ReviewStatus = ReviewStatus.NOT_RUN,
+    ) -> None:
         self.success = success
         self.review_fallback = review_fallback
+        self.review_status = review_status
         self.calls = 0
 
     async def search(self, *_args, **_kwargs):
         self.calls += 1
-        if self.success:
-            return b"image", "", self.review_fallback
-        return None, "soutu failed", False
+        return SimpleNamespace(
+            image_bytes=b"image" if self.success else None,
+            error="" if self.success else "soutu failed",
+            review_fallback=self.review_fallback,
+            review_status=self.review_status,
+        )
 
     async def terminate(self) -> None:
         return None
@@ -79,7 +89,7 @@ class _PixivFoundButSendTimeout:
         self.calls += 1
         return SimpleNamespace(
             success=True,
-            error="Pixiv 已找到作品并尝试发送，但平台发送确认超时或失败；不会切换其它图源。",
+            error="Pixiv ?????????????????????????????????",
             sent_count=0,
             found_count=3,
             send_attempted=True,
@@ -93,9 +103,15 @@ class _PixivFoundButSendTimeout:
 
 
 class _Serp:
-    def __init__(self, success: bool, review_fallback: bool = False) -> None:
+    def __init__(
+        self,
+        success: bool,
+        review_fallback: bool = False,
+        review_status: ReviewStatus = ReviewStatus.NOT_RUN,
+    ) -> None:
         self.success = success
         self.review_fallback = review_fallback
+        self.review_status = review_status
         self.calls = 0
         self.last_kwargs = {}
 
@@ -109,6 +125,7 @@ class _Serp:
             image_bytes=b"image" if self.success else None,
             error="" if self.success else "serp failed",
             review_fallback=self.review_fallback,
+            review_status=self.review_status,
         )
 
     async def close(self) -> None:
@@ -134,7 +151,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_prefers_pixiv_for_anime_queries(self) -> None:
         pixiv, soutu, serp = _Pixiv(True), _Soutu(True), _Serp(True)
         service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
-        result = await service.search(_Event(), "初音ミク 插画", "初音未来", "auto")
+        result = await service.search(_Event(), "???? ??", "????", "auto")
         self.assertTrue(result.success)
         self.assertEqual(result.source, "pixiv")
         self.assertEqual(result.attempted_sources, ["pixiv"])
@@ -143,7 +160,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_source_falls_back_in_configured_order(self) -> None:
         pixiv, soutu, serp = _Pixiv(False), _Soutu(False), _Serp(True)
         service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
-        result = await service.search(_Event(), "雪山", "雪山日出", "pixiv")
+        result = await service.search(_Event(), "??", "????", "pixiv")
         self.assertTrue(result.success)
         self.assertEqual(result.source, "serpapi")
         self.assertEqual(result.attempted_sources, ["pixiv", "soutu", "serpapi"])
@@ -156,17 +173,17 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         result = await service.search(
             _Event(),
             "",
-            "米山舞 初音ミク",
+            "??? ????",
             "soutu",
-            artist_name="米山舞",
+            artist_name="???",
         )
 
         self.assertTrue(result.success)
         self.assertEqual(result.source, "pixiv")
         self.assertEqual(result.attempted_sources, ["pixiv"])
-        self.assertEqual(pixiv.last_kwargs["artist_name"], "米山舞")
+        self.assertEqual(pixiv.last_kwargs["artist_name"], "???")
         self.assertEqual(pixiv.last_kwargs["pixiv_user_id"], "")
-        self.assertEqual(result.pixiv_artist_name, "米山舞")
+        self.assertEqual(result.pixiv_artist_name, "???")
         self.assertEqual(soutu.calls, 0)
         self.assertEqual(serp.calls, 0)
 
@@ -174,7 +191,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         pixiv, soutu, serp = _Pixiv(True), _Soutu(True), _Serp(True)
         service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
 
-        result = await service.search(_Event(), "雪山", "雪山日出", "auto")
+        result = await service.search(_Event(), "??", "????", "auto")
 
         self.assertTrue(result.success)
         self.assertEqual(result.source, "soutu")
@@ -187,7 +204,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
 
         result = await service.search(
-            _Event(), "朝日奈みらい", "朝日奈みらい 魔法使光之美少女", "pixiv"
+            _Event(), "??????", "?????? ????????", "pixiv"
         )
         payload = json.loads(result.to_json())
 
@@ -200,7 +217,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.delivery_uncertain)
         self.assertEqual(soutu.calls, 0)
         self.assertEqual(serp.calls, 0)
-        self.assertIn("不要切换其它图源", payload["instruction"])
+        self.assertIn("????????", payload["instruction"])
 
     async def test_send_wait_timeout_returns_without_trying_next_source(self) -> None:
         soutu, serp = _Soutu(True), _Serp(True)
@@ -214,7 +231,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             serp,
         )
 
-        result = await service.search(_SlowEvent(), "雪山", "雪山日出", "soutu")
+        result = await service.search(_SlowEvent(), "??", "????", "soutu")
         await service.close()
 
         self.assertTrue(result.success)
@@ -230,7 +247,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         service = ForwardSearchOrchestrator(
             _config(fallback_enabled=False), pixiv, soutu, serp
         )
-        result = await service.search(_Event(), "角色插画", "角色", "pixiv")
+        result = await service.search(_Event(), "????", "??", "pixiv")
         self.assertFalse(result.success)
         self.assertEqual(result.attempted_sources, ["pixiv"])
         self.assertEqual(soutu.calls, 0)
@@ -241,12 +258,16 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         service = ForwardSearchOrchestrator(
             config, _Pixiv(True), _Soutu(True), _Serp(True)
         )
-        self.assertEqual(service.choose_sources("动漫插画", "auto")[0], "soutu")
+        self.assertEqual(service.choose_sources("????", "auto")[0], "soutu")
 
     async def test_fail_closed_review_rejects_fallback_image_and_uses_next_source(
         self,
     ) -> None:
-        soutu = _Soutu(True, review_fallback=True)
+        soutu = _Soutu(
+            True,
+            review_fallback=True,
+            review_status=ReviewStatus.ERROR,
+        )
         serp = _Serp(True)
         config = _config(
             pixiv={"enabled": False},
@@ -258,17 +279,136 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         )
         service = ForwardSearchOrchestrator(config, None, soutu, serp)
 
-        result = await service.search(_Event(), "雪山", "雪山日出", "soutu")
+        result = await service.search(_Event(), "??", "????", "soutu")
 
         self.assertTrue(result.success)
         self.assertEqual(result.source, "serpapi")
-        self.assertIn("不放行首图", result.errors["soutu"])
+        self.assertIn("?????", result.errors["soutu"])
         self.assertEqual(serp.calls, 1)
+
+    async def test_explicit_no_match_never_fail_opens_and_uses_next_source(
+        self,
+    ) -> None:
+        soutu = _Soutu(
+            True,
+            review_fallback=True,
+            review_status=ReviewStatus.NO_MATCH,
+        )
+        serp = _Serp(True)
+        config = _config(
+            pixiv={"enabled": False},
+            llm_review={
+                "enabled": True,
+                "commands_enabled": True,
+                "fail_open": True,
+            },
+        )
+        service = ForwardSearchOrchestrator(config, None, soutu, serp)
+        event = _Event()
+
+        result = await service.search(event, "??", "????????", "soutu")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.source, "serpapi")
+        self.assertIn("???", result.errors["soutu"])
+        self.assertEqual(len(event.sent), 1)
+        self.assertEqual(event.sent[0][0].file, "base64://aW1hZ2U=")
+        self.assertEqual(serp.calls, 1)
+
+    async def test_review_error_fail_open_sends_current_source_candidate(self) -> None:
+        event = _Event()
+        soutu = _Soutu(
+            True,
+            review_fallback=True,
+            review_status=ReviewStatus.ERROR,
+        )
+        serp = _Serp(True)
+        service = ForwardSearchOrchestrator(
+            _config(
+                pixiv={"enabled": False},
+                llm_review={
+                    "enabled": True,
+                    "commands_enabled": True,
+                    "fail_open": True,
+                },
+            ),
+            None,
+            soutu,
+            serp,
+        )
+
+        result = await service.search(event, "??", "????????", "soutu")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.source, "soutu")
+        self.assertTrue(result.review_fallback)
+        self.assertEqual(serp.calls, 0)
+
+    def test_real_image_auto_fallback_prefers_serpapi_before_pixiv(self) -> None:
+        service = ForwardSearchOrchestrator(
+            _config(),
+            _Pixiv(True),
+            _Soutu(True),
+            _Serp(True),
+        )
+
+        self.assertEqual(
+            service.choose_sources("?? ????", "auto"),
+            ["soutu", "serpapi", "pixiv"],
+        )
+
+    def test_custom_fallback_order_is_preserved_for_real_images(self) -> None:
+        service = ForwardSearchOrchestrator(
+            _config(fallback_order=["pixiv", "serpapi", "soutu"]),
+            _Pixiv(True),
+            _Soutu(True),
+            _Serp(True),
+        )
+
+        self.assertEqual(
+            service.choose_sources("?? ????", "auto"),
+            ["soutu", "pixiv", "serpapi"],
+        )
+
+    async def test_explicit_no_match_without_source_fallback_sends_nothing(
+        self,
+    ) -> None:
+        event = _Event()
+        soutu = _Soutu(
+            False,
+            review_fallback=True,
+            review_status=ReviewStatus.NO_MATCH,
+        )
+        service = ForwardSearchOrchestrator(
+            _config(
+                fallback_enabled=False,
+                pixiv={"enabled": False},
+                serpapi={"enabled": False},
+                llm_review={
+                    "enabled": True,
+                    "commands_enabled": True,
+                    "fail_open": True,
+                },
+            ),
+            None,
+            soutu,
+            None,
+        )
+
+        result = await service.search(event, "??", "????????", "soutu")
+
+        self.assertFalse(result.success)
+        self.assertFalse(result.message_sent)
+        self.assertEqual(event.sent, [])
 
     async def test_serpapi_vlm_switch_disables_review_and_fail_closed_check(
         self,
     ) -> None:
-        serp = _Serp(True, review_fallback=True)
+        serp = _Serp(
+            True,
+            review_fallback=True,
+            review_status=ReviewStatus.ERROR,
+        )
         config = _config(
             pixiv={"enabled": False},
             soutu={"enabled": False},
@@ -281,7 +421,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         )
         service = ForwardSearchOrchestrator(config, None, None, serp)
 
-        result = await service.search(_Event(), "雪山", "雪山日出", "serpapi")
+        result = await service.search(_Event(), "??", "????", "serpapi")
 
         self.assertTrue(result.success)
         self.assertEqual(result.source, "serpapi")

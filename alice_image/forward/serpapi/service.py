@@ -1,4 +1,4 @@
-"""SerpApi 文字搜图服务。"""
+"""SerpApi ???????"""
 
 from __future__ import annotations
 
@@ -9,10 +9,12 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context
 
+from ..review import ReviewStatus
 from .composer import download_image
 from .forward_search import fetch_image_urls, run_tournament
 from .image_utils import HttpService
 from .serpapi_client import SerpApiClient, SerpApiError
+from .vlm import VlmReviewError
 
 
 @dataclass(slots=True)
@@ -21,10 +23,11 @@ class SerpForwardResult:
     image_url: str = ""
     error: str = ""
     review_fallback: bool = False
+    review_status: ReviewStatus = ReviewStatus.NOT_RUN
 
 
 class SerpApiForwardService:
-    """抓取 Google 图片候选，并可用视觉模型做淘汰赛。"""
+    """?? Google ?????????????????"""
 
     def __init__(self, context: Context, config: dict[str, Any] | None = None) -> None:
         self.context = context
@@ -65,7 +68,7 @@ class SerpApiForwardService:
             if provider:
                 return provider
             logger.warning(
-                "[AliceImageSerpApi] 找不到审核模型 %s，回退当前会话模型",
+                "[AliceImageSerpApi] ??????? %s?????????",
                 self.vlm_provider_id,
             )
         provider_id = await self.context.get_current_chat_provider_id(
@@ -79,12 +82,13 @@ class SerpApiForwardService:
         query: str,
         description: str = "",
         review_enabled: bool = True,
+        strict_match_enabled: bool = True,
     ) -> SerpForwardResult:
         query = str(query or "").strip()
         if not query:
-            return SerpForwardResult(error="搜索关键词不能为空。")
+            return SerpForwardResult(error="??????????")
         if not self.available():
-            return SerpForwardResult(error="未配置可用的 SerpApi Key。")
+            return SerpForwardResult(error="?????? SerpApi Key?")
 
         try:
             urls = await fetch_image_urls(
@@ -95,20 +99,22 @@ class SerpApiForwardService:
                 self.gl,
             )
         except SerpApiError as exc:
-            return SerpForwardResult(error=f"SerpApi 搜索失败：{exc}")
+            return SerpForwardResult(error=f"SerpApi ?????{exc}")
         except Exception as exc:  # noqa: BLE001
-            logger.error("[AliceImageSerpApi] 抓取失败: %s", exc, exc_info=True)
-            return SerpForwardResult(error=f"SerpApi 搜索失败：{exc}")
+            logger.error("[AliceImageSerpApi] ????: %s", exc, exc_info=True)
+            return SerpForwardResult(error=f"SerpApi ?????{exc}")
 
         if not urls:
-            return SerpForwardResult(error=f"没有找到与「{query}」相关的图片。")
+            return SerpForwardResult(error=f"??????{query}???????")
 
         selected_url = urls[0]
         review_fallback = False
-        if review_enabled and len(urls) > 1:
+        review_status = ReviewStatus.NOT_RUN
+        if review_enabled:
             provider = await self._get_vlm_provider(event)
             if provider is None:
                 review_fallback = True
+                review_status = ReviewStatus.ERROR
             else:
                 try:
                     winner = await run_tournament(
@@ -120,21 +126,37 @@ class SerpApiForwardService:
                     )
                     if winner:
                         selected_url = winner
+                        review_status = ReviewStatus.MATCHED
                     else:
                         review_fallback = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("[AliceImageSerpApi] 审核失败，使用首图: %s", exc)
+                        review_status = ReviewStatus.NO_MATCH
+                except VlmReviewError as exc:
+                    logger.warning("[AliceImageSerpApi] ????????????: %s", exc)
                     review_fallback = True
+                    review_status = ReviewStatus.ERROR
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[AliceImageSerpApi] ???????????: %s", exc)
+                    review_fallback = True
+                    review_status = ReviewStatus.ERROR
+
+        if review_status is ReviewStatus.NO_MATCH and strict_match_enabled:
+            return SerpForwardResult(
+                error="??????? SerpApi ???????????",
+                review_fallback=True,
+                review_status=review_status,
+            )
 
         image_bytes = await download_image(selected_url, self.http)
         if not image_bytes:
             return SerpForwardResult(
                 image_url=selected_url,
-                error="已选出候选图，但下载失败。",
+                error="?????????????",
                 review_fallback=review_fallback,
+                review_status=review_status,
             )
         return SerpForwardResult(
             image_bytes=image_bytes,
             image_url=selected_url,
             review_fallback=review_fallback,
+            review_status=review_status,
         )

@@ -1,4 +1,4 @@
-"""面向 LLM 的精确 Pixiv 找图与可选视觉审核。"""
+"""?? LLM ??? Pixiv ??????????"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from ..pixiv.utils.tag import (
 )
 from .serpapi.vlm import select_from_collage
 from .soutu.composer import ComposerManager
+from .review import ReviewStatus
 
 
 @dataclass(slots=True)
@@ -38,6 +39,7 @@ class PixivForwardResult:
     send_attempted: bool = False
     delivery_uncertain: bool = False
     review_fallback: bool = False
+    review_status: ReviewStatus = ReviewStatus.NOT_RUN
     artist_user_id: int | None = None
     artist_name: str = ""
     artist_account: str = ""
@@ -93,9 +95,9 @@ class PixivForwardSearchService:
                 return
             try:
                 done_task.result()
-                logger.info("[AliceImagePixiv] 后台发送任务已完成。")
+                logger.info("[AliceImagePixiv] ??????????")
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[AliceImagePixiv] 后台发送任务最终失败: %s", exc)
+                logger.warning("[AliceImagePixiv] ??????????: %s", exc)
 
         task.add_done_callback(_done)
 
@@ -121,7 +123,7 @@ class PixivForwardSearchService:
             return (
                 False,
                 True,
-                f"发送等待超过 {timeout_seconds:g} 秒，已转入后台继续等待平台确认",
+                f"?????? {timeout_seconds:g} ???????????????",
             )
         except Exception as exc:  # noqa: BLE001
             return False, True, str(exc)
@@ -133,7 +135,7 @@ class PixivForwardSearchService:
             if provider:
                 return provider
             logger.warning(
-                "[AliceImagePixiv] 找不到审核模型 %s，回退当前会话模型",
+                "[AliceImagePixiv] ??????? %s?????????",
                 provider_id,
             )
         current_id = await self.context.get_current_chat_provider_id(
@@ -153,7 +155,7 @@ class PixivForwardSearchService:
     async def _collect(self, query: str) -> tuple[list[Any], list[str], str]:
         parsed = validate_and_process_tags(query)
         if not parsed.get("success"):
-            return [], [], str(parsed.get("error_message") or "标签无效")
+            return [], [], str(parsed.get("error_message") or "????")
 
         client = self.controller.client
         pages = self._bounded_int("pixiv_search_pages", 5, 1, 20)
@@ -176,7 +178,7 @@ class PixivForwardSearchService:
                 else:
                     break
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[AliceImagePixiv] 第 %s 页搜索失败: %s", page + 1, exc)
+                logger.warning("[AliceImagePixiv] ? %s ?????: %s", page + 1, exc)
                 break
             page_items = list(getattr(response, "illusts", None) or [])
             if not page_items:
@@ -188,7 +190,7 @@ class PixivForwardSearchService:
                 await asyncio.sleep(0.15)
 
         if not all_items:
-            return [], parsed.get("exclude_tags", []), "没有找到 Pixiv 候选作品。"
+            return [], parsed.get("exclude_tags", []), "???? Pixiv ?????"
         all_items.sort(
             key=lambda item: getattr(item, "total_bookmarks", 0) or 0,
             reverse=True,
@@ -220,7 +222,7 @@ class PixivForwardSearchService:
         raw_user_id = str(pixiv_user_id or "").strip()
         if raw_user_id:
             if not raw_user_id.isdigit():
-                return None, f"Pixiv 用户 ID 必须是数字：{raw_user_id}"
+                return None, f"Pixiv ?? ID ??????{raw_user_id}"
             user_id = int(raw_user_id)
             try:
                 detail = await self.controller.client_wrapper.call_pixiv_api(
@@ -239,15 +241,15 @@ class PixivForwardSearchService:
                     )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "[AliceImagePixiv] 获取画师详情失败，继续使用用户 ID %s: %s",
+                    "[AliceImagePixiv] ??????????????? ID %s: %s",
                     user_id,
                     exc,
                 )
-            return PixivArtistTarget(user_id=user_id, name=f"用户ID {user_id}"), ""
+            return PixivArtistTarget(user_id=user_id, name=f"??ID {user_id}"), ""
 
         name = self._clean_artist_text(artist_name)
         if not name:
-            return None, "请提供 Pixiv 画师名或用户 ID。"
+            return None, "??? Pixiv ?????? ID?"
 
         try:
             response = await self.controller.client_wrapper.call_pixiv_api(
@@ -255,12 +257,12 @@ class PixivForwardSearchService:
                 name,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[AliceImagePixiv] 搜索画师失败: %s", exc)
-            return None, f"搜索 Pixiv 画师失败：{exc}"
+            logger.warning("[AliceImagePixiv] ??????: %s", exc)
+            return None, f"?? Pixiv ?????{exc}"
 
         previews = list(getattr(response, "user_previews", None) or [])
         if not previews:
-            return None, f"没有找到 Pixiv 画师：{name}"
+            return None, f"???? Pixiv ???{name}"
 
         target_norm = name.lower()
 
@@ -283,7 +285,7 @@ class PixivForwardSearchService:
         user = self._user_from_preview(selected_preview)
         resolved_user_id = self._user_id(user)
         if resolved_user_id is None:
-            return None, f"Pixiv 画师「{name}」缺少有效用户 ID。"
+            return None, f"Pixiv ???{name}??????? ID?"
         return (
             PixivArtistTarget(
                 user_id=resolved_user_id,
@@ -379,11 +381,11 @@ class PixivForwardSearchService:
         if query:
             include_tags, exclude_tags, conflicts = parse_tags_with_exclusion(query)
             if conflicts:
-                conflict_list = "、".join(conflicts)
+                conflict_list = "?".join(conflicts)
                 return (
                     [],
                     [],
-                    f"标签冲突：以下标签同时出现在包含和排除列表中：{conflict_list}",
+                    f"???????????????????????{conflict_list}",
                     target,
                 )
 
@@ -407,7 +409,7 @@ class PixivForwardSearchService:
                     break
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "[AliceImagePixiv] 获取画师 %s 第 %s 页作品失败: %s",
+                    "[AliceImagePixiv] ???? %s ? %s ?????: %s",
                     target.user_id,
                     page + 1,
                     exc,
@@ -423,8 +425,8 @@ class PixivForwardSearchService:
                 await asyncio.sleep(0.15)
 
         if not all_items:
-            artist_label = target.name or f"用户ID {target.user_id}"
-            return [], exclude_tags, f"画师「{artist_label}」没有公开插画作品。", target
+            artist_label = target.name or f"??ID {target.user_id}"
+            return [], exclude_tags, f"???{artist_label}??????????", target
 
         return (
             self._rank_artist_items(all_items, include_tags),
@@ -438,7 +440,7 @@ class PixivForwardSearchService:
         items: list[Any],
         excluded_tags: list[str],
         count: int,
-        display_tag_str: str = "LLM 精确找图",
+        display_tag_str: str = "LLM ????",
     ) -> list[Any]:
         cfg = self.controller.pixiv_config
         filter_cfg = FilterConfig(
@@ -467,13 +469,13 @@ class PixivForwardSearchService:
         items: list[Any],
         description: str,
         count: int,
-    ) -> tuple[list[Any], bool, str]:
+    ) -> tuple[list[Any], ReviewStatus, str]:
         provider = await self._provider(event)
         fail_open = bool(self.review_config.get("fail_open", True))
         if provider is None:
             if fail_open:
-                return items[:count], True, ""
-            return [], False, "未找到可用的视觉审核模型。"
+                return items[:count], ReviewStatus.ERROR, ""
+            return [], ReviewStatus.ERROR, "?????????????"
 
         candidate_count = self._bounded_int("candidate_count", 12, count, 24)
         session = await self.controller._get_http_session()
@@ -498,8 +500,8 @@ class PixivForwardSearchService:
         )
         if not collage_bytes or not collage_items:
             if fail_open:
-                return items[:count], True, ""
-            return [], False, "Pixiv 候选图下载失败，无法执行审核。"
+                return items[:count], ReviewStatus.ERROR, ""
+            return [], ReviewStatus.ERROR, "Pixiv ???????????????"
 
         try:
             async with self._review_lock:
@@ -511,8 +513,10 @@ class PixivForwardSearchService:
                     max_selection=count,
                 )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[AliceImagePixiv] 视觉审核异常: %s", exc)
-            indices = []
+            logger.warning("[AliceImagePixiv] ??????: %s", exc)
+            if fail_open:
+                return items[:count], ReviewStatus.ERROR, ""
+            return [], ReviewStatus.ERROR, "Pixiv ??????????????"
 
         selected = [
             item_by_url.get(collage_items[index - 1][0])
@@ -521,15 +525,16 @@ class PixivForwardSearchService:
         ]
         selected = [item for item in selected if item is not None]
         if not selected:
-            if fail_open:
-                return items[:count], True, ""
-            return [], False, "视觉审核没有选出符合描述的 Pixiv 作品。"
+            if not self.review_config.get("strict_match_enabled", True):
+                return items[:count], ReviewStatus.NO_MATCH, ""
+            return [], ReviewStatus.NO_MATCH, "????????????? Pixiv ???"
 
-        selected_ids = {getattr(item, "id", None) for item in selected}
-        selected.extend(
-            item for item in items if getattr(item, "id", None) not in selected_ids
-        )
-        return selected[:count], False, ""
+        if not self.review_config.get("strict_match_enabled", True):
+            selected_ids = {getattr(item, "id", None) for item in selected}
+            selected.extend(
+                item for item in items if getattr(item, "id", None) not in selected_ids
+            )
+        return selected[:count], ReviewStatus.MATCHED, ""
 
     async def search(
         self,
@@ -555,7 +560,7 @@ class PixivForwardSearchService:
         )
         if artist_scoped:
             if not self.controller.features.get("artist_search", True):
-                return PixivForwardResult(error="Pixiv 指定画师找图功能已关闭。")
+                return PixivForwardResult(error="Pixiv ????????????")
             items, excluded_tags, error, artist_target = await self._collect_artist(
                 query,
                 artist_name=artist_name,
@@ -572,14 +577,14 @@ class PixivForwardSearchService:
             )
 
         display_tag_str = (
-            f"画师:{artist_target.name or artist_target.user_id}"
+            f"??:{artist_target.name or artist_target.user_id}"
             if artist_target
-            else "LLM 精确找图"
+            else "LLM ????"
         )
         filtered = self._filter(items, excluded_tags, count, display_tag_str)
         if not filtered:
             return PixivForwardResult(
-                error="候选作品全部被内容或质量规则过滤。",
+                error="?????????????????",
                 artist_user_id=artist_target.user_id if artist_target else None,
                 artist_name=artist_target.name if artist_target else "",
                 artist_account=artist_target.account if artist_target else "",
@@ -598,15 +603,20 @@ class PixivForwardSearchService:
 
         selected = candidates[:count]
         review_fallback = False
-        if review_enabled and description.strip() and len(candidates) > 1:
-            selected, review_fallback, error = await self._review(
+        review_status = ReviewStatus.NOT_RUN
+        if review_enabled and description.strip() and candidates:
+            selected, review_status, error = await self._review(
                 event,
                 candidates,
                 description.strip(),
                 count,
             )
             if error:
-                return PixivForwardResult(error=error)
+                return PixivForwardResult(error=error, review_status=review_status)
+            review_fallback = review_status in (
+                ReviewStatus.NO_MATCH,
+                ReviewStatus.ERROR,
+            )
 
         selected_ids = {getattr(item, "id", None) for item in selected}
         ordered_candidates = selected + [
@@ -634,6 +644,7 @@ class PixivForwardSearchService:
                 sent_count=0,
                 send_attempted=False,
                 review_fallback=review_fallback,
+                review_status=review_status,
                 artist_user_id=artist_target.user_id if artist_target else None,
                 artist_name=artist_target.name if artist_target else "",
                 artist_account=artist_target.account if artist_target else "",
@@ -650,9 +661,9 @@ class PixivForwardSearchService:
             min_likes=cfg.min_likes,
             return_count=len(selected),
             display_tag_str=(
-                f"画师:{artist_target.name or artist_target.user_id}"
+                f"??:{artist_target.name or artist_target.user_id}"
                 if artist_target
-                else f"搜索:{query}"
+                else f"??:{query}"
             ),
             logger=logger,
             show_filter_result=False,
@@ -687,16 +698,16 @@ class PixivForwardSearchService:
                 delivery_uncertain = True
                 if uncertain:
                     last_send_error = send_error
-                logger.warning("[AliceImagePixiv] 发送候选失败: %s", send_error)
+                logger.warning("[AliceImagePixiv] ??????: %s", send_error)
 
         if sent > 0:
             error = ""
         elif send_attempted:
-            error = "Pixiv 已找到作品并尝试发送，但平台发送确认超时或失败；不会切换其它图源。"
+            error = "Pixiv ?????????????????????????????????"
             if last_send_error:
-                error = f"{error}最后一次发送错误：{last_send_error}"
+                error = f"{error}?????????{last_send_error}"
         else:
-            error = "Pixiv 已找到作品，但没有生成可发送的消息；不会切换其它图源。"
+            error = "Pixiv ???????????????????????????"
 
         return PixivForwardResult(
             success=bool(selected),
@@ -707,6 +718,7 @@ class PixivForwardSearchService:
             send_attempted=send_attempted,
             delivery_uncertain=delivery_uncertain,
             review_fallback=review_fallback,
+            review_status=review_status,
             artist_user_id=artist_target.user_id if artist_target else None,
             artist_name=artist_target.name if artist_target else "",
             artist_account=artist_target.account if artist_target else "",

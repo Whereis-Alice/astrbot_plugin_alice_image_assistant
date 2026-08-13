@@ -1,4 +1,4 @@
-"""爱丽丝的图片助手：文字找图、Pixiv 与以图搜图合集。"""
+"""??????????????Pixiv ????????"""
 
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ from .alice_image.tools import (
 )
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
-PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_NAME = "????????"
+PLUGIN_VERSION = "1.4.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 
@@ -36,7 +36,7 @@ MAX_COMMAND_RETURN_COUNT = 10
 @register(
     PLUGIN_ID,
     "Whereis-Alice",
-    "让 Bot 自主精确找图、挑图和以图搜图，并保留完整指令入口。",
+    "? Bot ?????????????????????????",
     PLUGIN_VERSION,
     PLUGIN_REPO,
 )
@@ -108,7 +108,7 @@ class AliceImageAssistantPlugin(Star):
             self.reverse = AliceReverseController(context, reverse_runtime)
 
         self._register_tools()
-        logger.info("[%s] v%s 已加载", PLUGIN_NAME, PLUGIN_VERSION)
+        logger.info("[%s] v%s ???", PLUGIN_NAME, PLUGIN_VERSION)
 
     def _register_tools(self) -> None:
         tools = []
@@ -129,7 +129,7 @@ class AliceImageAssistantPlugin(Star):
         if tools:
             self.context.add_llm_tools(*tools)
             logger.info(
-                "[%s] 已注册工具: %s",
+                "[%s] ?????: %s",
                 PLUGIN_NAME,
                 ", ".join(tool.name for tool in tools),
             )
@@ -141,7 +141,7 @@ class AliceImageAssistantPlugin(Star):
             await self.reverse.terminate()
         if self.pixiv:
             await self.pixiv.terminate()
-        logger.info("[%s] 已卸载并释放网络、浏览器与调度资源", PLUGIN_NAME)
+        logger.info("[%s] ?????????????????", PLUGIN_NAME)
 
     def _find_commands_enabled(self) -> bool:
         return self.find_config.get("enabled", True) and self.find_config.get(
@@ -173,10 +173,10 @@ class AliceImageAssistantPlugin(Star):
         *args: Any,
     ) -> AsyncGenerator[Any, None]:
         if self.pixiv is None:
-            yield event.plain_result("Pixiv 模块未启用或尚未配置。")
+            yield event.plain_result("Pixiv ???????????")
             return
         if not self._pixiv_feature(feature):
-            yield event.plain_result(f"Pixiv 功能「{feature}」已关闭。")
+            yield event.plain_result(f"Pixiv ???{feature}?????")
             return
         handler = getattr(self.pixiv, method)
         async for result in handler(event, *args):
@@ -200,7 +200,7 @@ class AliceImageAssistantPlugin(Star):
             return (
                 parts[0].strip(),
                 None,
-                f"返回作品数必须是 1-{MAX_COMMAND_RETURN_COUNT} 的整数。",
+                f"???????? 1-{MAX_COMMAND_RETURN_COUNT} ????",
             )
         return parts[0].strip(), count, ""
 
@@ -210,13 +210,13 @@ class AliceImageAssistantPlugin(Star):
         source: str,
     ) -> AsyncGenerator[Any, None]:
         if not self._find_commands_enabled() or self.forward is None:
-            yield event.plain_result("找图指令已关闭。")
+            yield event.plain_result("????????")
             return
         query = self._command_tail(event)
         if not query:
-            yield event.plain_result("请提供关键词，例如：/aa找 雪山 日出。")
+            yield event.plain_result("??????????/aa? ?? ???")
             return
-        yield event.plain_result(f"正在从 {source} 来源寻找「{query}」...")
+        yield event.plain_result(f"??? {source} ?????{query}?...")
         outcome = await self.forward.search(
             event,
             query,
@@ -228,26 +228,26 @@ class AliceImageAssistantPlugin(Star):
         if outcome.success:
             notes = []
             if outcome.review_fallback:
-                notes.append("视觉审核已回退到首选结果")
+                notes.append("????????????")
             if outcome.delivery_uncertain:
-                notes.append("平台发送确认超时或失败，已停止切换其它图源")
-            note = f"；{'；'.join(notes)}" if notes else ""
-            yield event.plain_result(f"找图完成，来源：{outcome.source}{note}。")
+                notes.append("?????????????????????")
+            note = f"?{'?'.join(notes)}" if notes else ""
+            yield event.plain_result(f"????????{outcome.source}{note}?")
         else:
-            details = "；".join(
+            details = "?".join(
                 f"{name}: {message}" for name, message in outcome.errors.items()
             )
-            yield event.plain_result(f"找图失败：{details or '所有来源均无结果'}")
+            yield event.plain_result(f"?????{details or '????????'}")
 
     async def _pixiv_artist_find_command(
         self,
         event: AstrMessageEvent,
     ) -> AsyncGenerator[Any, None]:
         if not self._find_commands_enabled() or self.forward is None:
-            yield event.plain_result("找图指令已关闭。")
+            yield event.plain_result("????????")
             return
         if not self._pixiv_feature("artist_search"):
-            yield event.plain_result("Pixiv 指定画师找图功能已关闭。")
+            yield event.plain_result("Pixiv ????????????")
             return
 
         text, count, count_error = self._parse_query_count(self._command_tail(event))
@@ -256,26 +256,26 @@ class AliceImageAssistantPlugin(Star):
             return
         if not text:
             yield event.plain_result(
-                "请提供画师和可选关键词，例如：/aaP画师找 米山舞 | 初音ミク 1。"
+                "???????????????/aaP??? ??? | ???? 1?"
             )
             return
         if "|" in text:
             artist_part, query = (part.strip() for part in text.split("|", 1))
-        elif "｜" in text:
-            artist_part, query = (part.strip() for part in text.split("｜", 1))
+        elif "?" in text:
+            artist_part, query = (part.strip() for part in text.split("?", 1))
         else:
             artist_part, query = text.strip(), ""
         if not artist_part:
             yield event.plain_result(
-                "请提供画师名或 Pixiv 用户 ID，例如：/aaP画师找 12345678 | 初音ミク 1。"
+                "??????? Pixiv ?? ID????/aaP??? 12345678 | ???? 1?"
             )
             return
 
         pixiv_user_id = artist_part if artist_part.isdigit() else ""
         artist_name = "" if pixiv_user_id else artist_part
         description = " ".join(part for part in (artist_part, query) if part)
-        label = f"{artist_part} 的 {query}" if query else artist_part
-        yield event.plain_result(f"正在从 Pixiv 画师作品中寻找「{label}」...")
+        label = f"{artist_part} ? {query}" if query else artist_part
+        yield event.plain_result(f"??? Pixiv ????????{label}?...")
         outcome = await self.forward.search(
             event,
             query,
@@ -288,12 +288,12 @@ class AliceImageAssistantPlugin(Star):
         )
         if outcome.success:
             artist = outcome.pixiv_artist_name or artist_part
-            yield event.plain_result(f"找图完成，Pixiv 画师：{artist}。")
+            yield event.plain_result(f"?????Pixiv ???{artist}?")
         else:
-            details = "；".join(
+            details = "?".join(
                 f"{name}: {message}" for name, message in outcome.errors.items()
             )
-            yield event.plain_result(f"画师找图失败：{details or '没有找到可发送作品'}")
+            yield event.plain_result(f"???????{details or '?????????'}")
 
     async def tool_find_image(
         self,
@@ -310,23 +310,23 @@ class AliceImageAssistantPlugin(Star):
             "llm_tools_enabled", True
         ):
             return json.dumps(
-                {"success": False, "error": "找图 LLM 工具已关闭"},
+                {"success": False, "error": "?? LLM ?????"},
                 ensure_ascii=False,
             )
         if is_explanation and not self.find_config.get(
             "auto_illustration_enabled", True
         ):
             return json.dumps(
-                {"success": False, "error": "主动配图功能已关闭"},
+                {"success": False, "error": "?????????"},
                 ensure_ascii=False,
             )
         if self.forward is None:
             return json.dumps(
-                {"success": False, "error": "没有可用找图来源"},
+                {"success": False, "error": "????????"},
                 ensure_ascii=False,
             )
         if self.find_config.get("llm_search_progress_message_enabled", False):
-            await event.send(event.plain_result(f"正在为你寻找「{query}」的图片..."))
+            await event.send(event.plain_result(f"???????{query}????..."))
         outcome = await self.forward.search(
             event,
             query,
@@ -344,7 +344,7 @@ class AliceImageAssistantPlugin(Star):
             "list_images_tool_enabled", True
         ):
             return json.dumps(
-                {"success": False, "error": "会话图片列表工具已关闭"},
+                {"success": False, "error": "???????????"},
                 ensure_ascii=False,
             )
         return await self.reverse.tool_get_session_images(event)
@@ -360,7 +360,7 @@ class AliceImageAssistantPlugin(Star):
             "reverse_tool_enabled", True
         ):
             return json.dumps(
-                {"success": False, "error": "以图搜图工具已关闭"},
+                {"success": False, "error": "?????????"},
                 ensure_ascii=False,
             )
         return await self.reverse.tool_search_image(
@@ -377,7 +377,7 @@ class AliceImageAssistantPlugin(Star):
     ) -> str:
         if self.pixiv is None or not self._pixiv_capability("novel_tool"):
             return json.dumps(
-                {"success": False, "error": "Pixiv 小说工具已关闭"},
+                {"success": False, "error": "Pixiv ???????"},
                 ensure_ascii=False,
             )
         return await self.pixiv.pixiv_llm_search(
@@ -392,7 +392,7 @@ class AliceImageAssistantPlugin(Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
-        marker = "【爱丽丝图片工具】"
+        marker = "?????????"
         if marker in (req.system_prompt or ""):
             return
 
@@ -402,16 +402,16 @@ class AliceImageAssistantPlugin(Star):
         ) and self.find_config.get("inject_tool_guidance_enabled", True)
         if find_guidance_enabled and self.find_config.get("llm_tools_enabled", True):
             find_guidance = (
-                "用户明确要求找图、发图、看图或壁纸时，调用 alice_image_find。"
-                "source 可用 auto/pixiv/soutu/serpapi；不确定时用 auto。"
-                "用户指定 Pixiv 作者/画师时，填写 artist_name 或 pixiv_user_id，"
-                "不要把作者名混进普通标签假装作者限定。"
-                "visual_description 只写真实需要匹配的主体、外观与风格，不要虚构罕见细节。"
+                "????????????????????? alice_image_find?"
+                "source ?? auto/pixiv/soutu/serpapi?????? auto?"
+                "???? Pixiv ??/?????? artist_name ? pixiv_user_id?"
+                "???????????????????"
+                "visual_description ???????????????????????????"
             )
             if self.find_config.get("auto_illustration_enabled", True):
                 find_guidance += (
-                    "介绍明确实体且配图明显有帮助时，可以主动调用 alice_image_find，"
-                    "并设置 is_explanation=true。"
+                    "?????????????????????? alice_image_find?"
+                    "??? is_explanation=true?"
                 )
             guidance_parts.append(find_guidance)
 
@@ -424,13 +424,13 @@ class AliceImageAssistantPlugin(Star):
         if reverse_guidance_enabled:
             if self.reverse_config.get("list_images_tool_enabled", True):
                 guidance_parts.append(
-                    "用户要求查图片来源时，先调用 alice_image_list_session_images，"
-                    "再用 image_id 调用 alice_image_reverse_search。"
+                    "?????????????? alice_image_list_session_images?"
+                    "?? image_id ?? alice_image_reverse_search?"
                 )
             else:
                 guidance_parts.append(
-                    "用户要求查最近一张图片来源时，直接调用 alice_image_reverse_search；"
-                    "需要选择更早的图片时使用 image_index。"
+                    "??????????????????? alice_image_reverse_search?"
+                    "???????????? image_index?"
                 )
 
         if guidance_parts:
@@ -448,32 +448,32 @@ class AliceImageAssistantPlugin(Star):
     @filter.command("aa")
     async def command_help(self, event: AstrMessageEvent):
         find_sources = (
-            self.forward.choose_sources("普通照片", "auto") if self.forward else []
+            self.forward.choose_sources("????", "auto") if self.forward else []
         )
         reverse_strategies = (
             self.reverse.service.get_available_strategies() if self.reverse else []
         )
         text = (
-            "爱丽丝的图片助手\n"
-            f"找图：{'开启' if self.find_config.get('enabled', True) else '关闭'}；"
-            f"当前来源：{', '.join(find_sources) or '无'}\n"
-            f"以图搜图：{'开启' if self.reverse else '关闭'}；"
-            f"当前引擎：{', '.join(reverse_strategies) or '无'}\n\n"
-            "常用指令：\n"
-            "/aa找 <关键词>  自动找图\n"
-            "/aaP <标签> [数量]  Pixiv 找图\n"
-            "/aaP画师找 <画师>|<关键词> [数量]  指定画师找图\n"
-            "/aa溯 [引擎]   附图、回复图片或随后发图\n"
-            "/aaP帮助       查看 Pixiv 全部指令"
+            "????????\n"
+            f"???{'??' if self.find_config.get('enabled', True) else '??'}?"
+            f"?????{', '.join(find_sources) or '?'}\n"
+            f"?????{'??' if self.reverse else '??'}?"
+            f"?????{', '.join(reverse_strategies) or '?'}\n\n"
+            "?????\n"
+            "/aa? <???>  ????\n"
+            "/aaP <??> [??]  Pixiv ??\n"
+            "/aaP??? <??>|<???> [??]  ??????\n"
+            "/aa? [??]   ????????????\n"
+            "/aaP??       ?? Pixiv ????"
         )
         yield event.plain_result(text)
 
-    @filter.command("aa找")
+    @filter.command("aa?")
     async def command_find_auto(self, event: AstrMessageEvent):
         async for result in self._find_command(event, "auto"):
             yield result
 
-    @filter.command("aa神")
+    @filter.command("aa?")
     async def command_find_soutu(self, event: AstrMessageEvent):
         async for result in self._find_command(event, "soutu"):
             yield result
@@ -483,10 +483,10 @@ class AliceImageAssistantPlugin(Star):
         async for result in self._find_command(event, "serpapi"):
             yield result
 
-    @filter.command("aa溯")
+    @filter.command("aa?")
     async def command_reverse(self, event: AstrMessageEvent):
         if not self._reverse_commands_enabled() or self.reverse is None:
-            yield event.plain_result("以图搜图指令已关闭。")
+            yield event.plain_result("??????????")
             return
         async for result in self.reverse.search_image_cmd(event):
             yield result
@@ -508,7 +508,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP新")
+    @filter.command("aaP?")
     async def pixiv_new(
         self,
         event: AstrMessageEvent,
@@ -524,14 +524,14 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP荐")
+    @filter.command("aaP?")
     async def pixiv_recommended(self, event: AstrMessageEvent, args: str = ""):
         async for result in self._pixiv_results(
             event, "illust_recommended", "pixiv_recommended", args
         ):
             yield result
 
-    @filter.command("aaP并")
+    @filter.command("aaP?")
     async def pixiv_and(self, event: AstrMessageEvent, tags: str = ""):
         async for result in self._pixiv_results(event, "illust_and", "pixiv_and", tags):
             yield result
@@ -543,7 +543,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP榜")
+    @filter.command("aaP?")
     async def pixiv_ranking(
         self,
         event: AstrMessageEvent,
@@ -555,21 +555,21 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP似")
+    @filter.command("aaP?")
     async def pixiv_related(self, event: AstrMessageEvent, illust_id: str = ""):
         async for result in self._pixiv_results(
             event, "related", "pixiv_related", illust_id
         ):
             yield result
 
-    @filter.command("aaP深")
+    @filter.command("aaP?")
     async def pixiv_deep(self, event: AstrMessageEvent, tags: str = ""):
         async for result in self._pixiv_results(
             event, "deep_search", "pixiv_deepsearch", tags
         ):
             yield result
 
-    @filter.command("aaP评")
+    @filter.command("aaP?")
     async def pixiv_comments(
         self,
         event: AstrMessageEvent,
@@ -581,28 +581,28 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP辑")
+    @filter.command("aaP?")
     async def pixiv_showcase(self, event: AstrMessageEvent, showcase_id: str = ""):
         async for result in self._pixiv_results(
             event, "showcase", "pixiv_showcase_article", showcase_id
         ):
             yield result
 
-    @filter.command("aaP画师")
+    @filter.command("aaP??")
     async def pixiv_user_search(self, event: AstrMessageEvent, username: str = ""):
         async for result in self._pixiv_results(
             event, "user_search", "pixiv_user_search", username
         ):
             yield result
 
-    @filter.command("aaP画师详")
+    @filter.command("aaP???")
     async def pixiv_user_detail(self, event: AstrMessageEvent, user_id: str = ""):
         async for result in self._pixiv_results(
             event, "user_detail", "pixiv_user_detail", user_id
         ):
             yield result
 
-    @filter.command("aaP画师作")
+    @filter.command("aaP???")
     async def pixiv_user_illusts(self, event: AstrMessageEvent):
         user_id, return_count, count_error = self._parse_query_count(
             self._command_tail(event)
@@ -619,7 +619,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP画师随")
+    @filter.command("aaP???")
     async def pixiv_user_random(self, event: AstrMessageEvent):
         user_id, return_count, count_error = self._parse_query_count(
             self._command_tail(event)
@@ -636,40 +636,40 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP画师找")
+    @filter.command("aaP???")
     async def pixiv_artist_find(self, event: AstrMessageEvent):
         async for result in self._pixiv_artist_find_command(event):
             yield result
 
-    @filter.command("aaP文")
+    @filter.command("aaP?")
     async def pixiv_novel(self, event: AstrMessageEvent, tags: str = ""):
         async for result in self._pixiv_results(
             event, "novel_search", "pixiv_novel", tags
         ):
             yield result
 
-    @filter.command("aaP文荐")
+    @filter.command("aaP??")
     async def pixiv_novel_recommended(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "novel_recommended", "pixiv_novel_recommended"
         ):
             yield result
 
-    @filter.command("aaP文新")
+    @filter.command("aaP??")
     async def pixiv_novel_new(self, event: AstrMessageEvent, max_id: str = ""):
         async for result in self._pixiv_results(
             event, "novel_new", "pixiv_novel_new", max_id
         ):
             yield result
 
-    @filter.command("aaP文系")
+    @filter.command("aaP??")
     async def pixiv_novel_series(self, event: AstrMessageEvent, series_id: str = ""):
         async for result in self._pixiv_results(
             event, "novel_series", "pixiv_novel_series", series_id
         ):
             yield result
 
-    @filter.command("aaP文评")
+    @filter.command("aaP??")
     async def pixiv_novel_comments(
         self,
         event: AstrMessageEvent,
@@ -681,89 +681,89 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP文下")
+    @filter.command("aaP??")
     async def pixiv_novel_download(self, event: AstrMessageEvent, novel_id: str = ""):
         async for result in self._pixiv_results(
             event, "novel_download", "pixiv_novel_download", novel_id
         ):
             yield result
 
-    @filter.command("aaP订")
+    @filter.command("aaP?")
     async def pixiv_sub_add(self, event: AstrMessageEvent, artist_id: str = ""):
         async for result in self._pixiv_results(
             event, "subscriptions", "pixiv_subscribe_add", artist_id
         ):
             yield result
 
-    @filter.command("aaP退")
+    @filter.command("aaP?")
     async def pixiv_sub_remove(self, event: AstrMessageEvent, artist_id: str = ""):
         async for result in self._pixiv_results(
             event, "subscriptions", "pixiv_subscribe_remove", artist_id
         ):
             yield result
 
-    @filter.command("aaP订阅")
+    @filter.command("aaP??")
     async def pixiv_sub_list(self, event: AstrMessageEvent, args: str = ""):
         async for result in self._pixiv_results(
             event, "subscriptions", "pixiv_subscribe_list", args
         ):
             yield result
 
-    @filter.command("aaP帮助")
+    @filter.command("aaP??")
     async def pixiv_help(self, event: AstrMessageEvent, args: str = ""):
         async for result in self._pixiv_results(event, "help", "pixiv_help", args):
             yield result
 
-    @filter.command("aaP随加")
+    @filter.command("aaP??")
     async def pixiv_random_add(self, event: AstrMessageEvent, tags: str = ""):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_add", tags
         ):
             yield result
 
-    @filter.command("aaP随删")
+    @filter.command("aaP??")
     async def pixiv_random_del(self, event: AstrMessageEvent, index: str = ""):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_del", index
         ):
             yield result
 
-    @filter.command("aaP随列")
+    @filter.command("aaP??")
     async def pixiv_random_list(self, event: AstrMessageEvent, args: str = ""):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_list", args
         ):
             yield result
 
-    @filter.command("aaP随停")
+    @filter.command("aaP??")
     async def pixiv_random_suspend(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_suspend"
         ):
             yield result
 
-    @filter.command("aaP随开")
+    @filter.command("aaP??")
     async def pixiv_random_resume(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_resume"
         ):
             yield result
 
-    @filter.command("aaP随态")
+    @filter.command("aaP??")
     async def pixiv_random_status(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_status"
         ):
             yield result
 
-    @filter.command("aaP随跑")
+    @filter.command("aaP??")
     async def pixiv_random_force(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "random_search", "pixiv_random_force"
         ):
             yield result
 
-    @filter.command("aaP随榜加")
+    @filter.command("aaP???")
     async def pixiv_random_ranking_add(
         self,
         event: AstrMessageEvent,
@@ -775,7 +775,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP随榜删")
+    @filter.command("aaP???")
     async def pixiv_random_ranking_del(
         self,
         event: AstrMessageEvent,
@@ -786,7 +786,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP随榜列")
+    @filter.command("aaP???")
     async def pixiv_random_ranking_list(
         self,
         event: AstrMessageEvent,
@@ -797,7 +797,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP趋势")
+    @filter.command("aaP??")
     async def pixiv_trending(self, event: AstrMessageEvent):
         async for result in self._pixiv_results(
             event, "trending_tags", "pixiv_trending_tags"
@@ -811,7 +811,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP设置")
+    @filter.command("aaP??")
     async def pixiv_config_command(
         self,
         event: AstrMessageEvent,
@@ -823,7 +823,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaP热")
+    @filter.command("aaP?")
     async def pixiv_hot(
         self,
         event: AstrMessageEvent,
@@ -836,7 +836,7 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaF主")
+    @filter.command("aaF?")
     async def fanbox_creator(
         self,
         event: AstrMessageEvent,
@@ -848,21 +848,21 @@ class AliceImageAssistantPlugin(Star):
         ):
             yield result
 
-    @filter.command("aaF帖")
+    @filter.command("aaF?")
     async def fanbox_post(self, event: AstrMessageEvent, post: str = ""):
         async for result in self._pixiv_results(
             event, "fanbox_post", "pixiv_fanbox_post", post
         ):
             yield result
 
-    @filter.command("aaF荐")
+    @filter.command("aaF?")
     async def fanbox_recommended(self, event: AstrMessageEvent, limit: str = "5"):
         async for result in self._pixiv_results(
             event, "fanbox_recommended", "pixiv_fanbox_recommended", limit
         ):
             yield result
 
-    @filter.command("aaF找")
+    @filter.command("aaF?")
     async def fanbox_artist(
         self,
         event: AstrMessageEvent,

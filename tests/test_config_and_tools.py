@@ -40,8 +40,8 @@ class ConfigAndToolTests(unittest.TestCase):
     def test_schema_has_exactly_two_public_groups(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
         self.assertEqual(list(schema), ["find_image", "reverse_image"])
-        self.assertEqual(schema["find_image"]["description"], "找图模块")
-        self.assertEqual(schema["reverse_image"]["description"], "以图搜图模块")
+        self.assertEqual(schema["find_image"]["description"], "????")
+        self.assertEqual(schema["reverse_image"]["description"], "??????")
 
     def test_every_pixiv_feature_is_boolean_and_defaulted(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
@@ -106,16 +106,23 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertTrue(settings["randomize_search_results"]["default"])
         self.assertTrue(settings["recent_dedup_enabled"]["default"])
 
+    def test_soutu_progressive_review_defaults_to_three_rounds(self) -> None:
+        schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
+        soutu = schema["find_image"]["items"]["soutu"]["items"]
+
+        self.assertEqual(soutu["review_rounds"]["default"], 3)
+        self.assertTrue(soutu["vlm_selection_enabled"]["default"])
+
     def test_artist_random_blocked_tags_match_exact_name_or_translation(self) -> None:
         item = SimpleNamespace(
             tags=[
-                SimpleNamespace(name="R-18", translated_name="成人向"),
-                {"name": "original", "translated_name": "原创"},
+                SimpleNamespace(name="R-18", translated_name="???"),
+                {"name": "original", "translated_name": "??"},
             ]
         )
 
         self.assertTrue(item_has_any_exact_tag(item, ["r-18"]))
-        self.assertTrue(item_has_any_exact_tag(item, ["原创"]))
+        self.assertTrue(item_has_any_exact_tag(item, ["??"]))
         self.assertFalse(item_has_any_exact_tag(item, ["R-1"]))
 
     def test_llm_tool_names_and_schemas_are_unique(self) -> None:
@@ -137,7 +144,7 @@ class ConfigAndToolTests(unittest.TestCase):
 
     def test_no_upstream_public_command_or_tool_identifiers_remain(self) -> None:
         source = (PLUGIN_ROOT / "main.py").read_text("utf-8")
-        self.assertNotRegex(source, r'@filter\.command\("搜图"')
+        self.assertNotRegex(source, r'@filter\.command\("??"')
         self.assertNotRegex(source, r'@filter\.command\("pixiv')
         for forbidden in (
             'name: str = "search_image_tool"',
@@ -149,27 +156,27 @@ class ConfigAndToolTests(unittest.TestCase):
         command_names = re.findall(r'@filter\.command\("([^"]+)"', source)
         self.assertEqual(len(command_names), len(set(command_names)))
         self.assertTrue(all(name.startswith("aa") for name in command_names))
-        self.assertNotIn('@filter.command("爱图', source)
+        self.assertNotIn('@filter.command("??', source)
         self.assertNotIn('alias=["alice-', source)
 
     def test_optional_pixiv_command_count_preserves_multi_word_query(self) -> None:
         parser = AliceImageAssistantPlugin._parse_query_count
 
-        self.assertEqual(parser("星之卡比 1"), ("星之卡比", 1, ""))
-        self.assertEqual(parser("初音ミク 冬"), ("初音ミク 冬", None, ""))
-        query, count, error = parser("星之卡比 11")
-        self.assertEqual((query, count), ("星之卡比", None))
+        self.assertEqual(parser("???? 1"), ("????", 1, ""))
+        self.assertEqual(parser("???? ?"), ("???? ?", None, ""))
+        query, count, error = parser("???? 11")
+        self.assertEqual((query, count), ("????", None))
         self.assertIn("1-10", error)
 
     def test_pixiv_help_examples_use_public_commands(self) -> None:
         message = (
-            "`/pixiv 初音ミク` `/pixiv_user_search 米山舞` "
+            "`/pixiv ????` `/pixiv_user_search ???` "
             "https://pypi.org/project/pixivpy3/"
         )
         replaced = replace_public_command_names(message)
 
-        self.assertIn("`/aaP 初音ミク`", replaced)
-        self.assertIn("`/aaP画师 米山舞`", replaced)
+        self.assertIn("`/aaP ????`", replaced)
+        self.assertIn("`/aaP?? ???`", replaced)
         self.assertIn("/project/pixivpy3/", replaced)
 
 

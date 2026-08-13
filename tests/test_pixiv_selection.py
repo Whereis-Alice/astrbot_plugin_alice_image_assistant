@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search import (
     PixivForwardSearchService,
 )
+from astrbot_plugin_alice_image_assistant.alice_image.forward.review import ReviewStatus
 from astrbot_plugin_alice_image_assistant.alice_image.pixiv.utils.selection import (
     PixivSelectionPolicy,
 )
@@ -169,8 +170,8 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
 
         result = await service.search(
             event,
-            "角色",
-            "精确描述",
+            "??",
+            "????",
             count=1,
             send_images=False,
         )
@@ -179,6 +180,83 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in reviewed_items], [2, 3])
         self.assertEqual(result.ids, [2])
         self.assertFalse(policy.calls[-1][2]["remember"])
+
+    async def test_strict_review_no_match_does_not_reinsert_pixiv_candidates(
+        self,
+    ) -> None:
+        works = [SimpleNamespace(id=value) for value in (1, 2)]
+        service = PixivForwardSearchService.__new__(PixivForwardSearchService)
+        service.controller = SimpleNamespace(
+            client_wrapper=SimpleNamespace(authenticate=AsyncMock(return_value=True)),
+            features={},
+            selection_policy=None,
+        )
+        service._collect = AsyncMock(return_value=(works, [], ""))
+        service._filter = Mock(return_value=works)
+        service._review = AsyncMock(
+            return_value=(
+                [],
+                ReviewStatus.NO_MATCH,
+                "????????????? Pixiv ???",
+            )
+        )
+
+        result = await service.search(
+            SimpleNamespace(unified_msg_origin="test:group:pixiv-no-match"),
+            "??",
+            "????????",
+            count=1,
+            send_images=False,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.ids, [])
+        self.assertIn("????", result.error)
+
+    async def test_strict_review_does_not_fill_unreviewed_pixiv_candidates(
+        self,
+    ) -> None:
+        works = [SimpleNamespace(id=value) for value in (1, 2, 3)]
+        service = PixivForwardSearchService.__new__(PixivForwardSearchService)
+        service.review_config = {"strict_match_enabled": True}
+        service.controller = SimpleNamespace(
+            _get_http_session=AsyncMock(return_value=object())
+        )
+        service._provider = AsyncMock(return_value=object())
+        service._preview_url = lambda item: f"https://example.com/{item.id}.jpg"
+        service._collage = SimpleNamespace(
+            create_collage_from_items=AsyncMock(
+                return_value=(
+                    b"collage",
+                    [
+                        (f"https://example.com/{item.id}.jpg", b"image")
+                        for item in works
+                    ],
+                )
+            )
+        )
+        service._review_lock = asyncio.Semaphore(1)
+
+        with (
+            patch(
+                "astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search.download_image",
+                AsyncMock(return_value=b"image"),
+            ),
+            patch(
+                "astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search.select_from_collage",
+                AsyncMock(return_value=[2]),
+            ),
+        ):
+            selected, status, error = await service._review(
+                SimpleNamespace(unified_msg_origin="test"),
+                works,
+                "??????",
+                count=3,
+            )
+
+        self.assertEqual([item.id for item in selected], [2])
+        self.assertEqual(status, ReviewStatus.MATCHED)
+        self.assertEqual(error, "")
 
 
 if __name__ == "__main__":
