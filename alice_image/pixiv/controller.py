@@ -154,7 +154,7 @@ class AlicePixivController:
             "name": "alice_image_pixiv",
             "author": "Huli3",
             "description": "爱丽丝图片助手的 Pixiv 模块",
-            "version": "1.4.0",
+            "version": "1.4.1",
             "homepage": "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant",
         }
 

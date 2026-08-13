@@ -18,6 +18,9 @@ from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.service impo
 from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.composer import (
     ComposerManager,
 )
+from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.vlm import (
+    select_best_image_index,
+)
 
 
 class _Context:
@@ -239,6 +242,47 @@ class SerpApiReviewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class VlmParsingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_soutu_completion_text_zero_is_a_valid_no_match(self) -> None:
+        provider = SimpleNamespace(
+            text_chat=AsyncMock(
+                return_value=SimpleNamespace(completion_text='{"best_index": 0}')
+            )
+        )
+
+        selected = await select_best_image_index(provider, b"image", "海狸", 2)
+
+        self.assertEqual(selected, -1)
+        provider.text_chat.assert_awaited_once()
+
+    async def test_soutu_completion_text_selects_second_image(self) -> None:
+        provider = SimpleNamespace(
+            text_chat=AsyncMock(
+                return_value=SimpleNamespace(completion_text='{"best_index": 2}')
+            )
+        )
+
+        selected = await select_best_image_index(provider, b"image", "海狸", 2)
+
+        self.assertEqual(selected, 1)
+        provider.text_chat.assert_awaited_once()
+
+    async def test_soutu_empty_response_is_a_review_error(self) -> None:
+        provider = SimpleNamespace(
+            text_chat=AsyncMock(
+                return_value=SimpleNamespace(completion_text="", result_chain=None)
+            )
+        )
+        with patch(
+            "astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.vlm.asyncio.sleep",
+            AsyncMock(),
+        ):
+            selected = await select_best_image_index(
+                provider, b"image", "海狸", 2
+            )
+
+        self.assertEqual(selected, -2)
+        self.assertEqual(provider.text_chat.await_count, 3)
+
     async def test_explicit_empty_selection_is_a_valid_no_match(self) -> None:
         provider = SimpleNamespace(
             text_chat=AsyncMock(

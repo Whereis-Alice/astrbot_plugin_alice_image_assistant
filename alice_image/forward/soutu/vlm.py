@@ -91,10 +91,16 @@ async def select_best_image_index(
                     prompt=prompt, image_urls=[temp_path]
                 )
 
-                if getattr(response, "result_chain", None) is None:
-                    raise ValueError("提供方API返回数据结构无效，未包含消息链。")
+                result_text = str(
+                    getattr(response, "completion_text", "") or ""
+                ).strip()
+                if not result_text and getattr(response, "result_chain", None) is not None:
+                    result_text = str(
+                        response.result_chain.get_plain_text() or ""
+                    ).strip()
+                if not result_text:
+                    raise ValueError("视觉审核模型返回空响应。")
 
-                result_text = response.result_chain.get_plain_text().strip()
                 json_blocks = _extract_json_objects(result_text)
                 parsed_index = None
 
