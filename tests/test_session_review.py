@@ -9,6 +9,7 @@ from astrbot_plugin_alice_image_assistant.alice_image.forward.session_review imp
     CurrentSessionReviewProvider,
     SessionReviewResolver,
     _recent_dialogue,
+    _remove_leading_dialogue,
 )
 
 
@@ -44,6 +45,22 @@ class SessionReviewTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
+    def test_persona_begin_dialogue_is_removed_before_recent_turn_slicing(
+        self,
+    ) -> None:
+        persona = [
+            {"role": "user", "content": "预设问题"},
+            {"role": "assistant", "content": "预设回答"},
+        ]
+        dialogue = persona + [
+            {"role": "user", "content": "当前请求"},
+        ]
+
+        self.assertEqual(
+            _remove_leading_dialogue(dialogue, persona),
+            [{"role": "user", "content": "当前请求"}],
+        )
+
     async def test_current_provider_uses_live_context_persona_and_no_tools(
         self,
     ) -> None:
@@ -67,7 +84,13 @@ class SessionReviewTests(unittest.IsolatedAsyncioTestCase):
             resolve_selected_persona=AsyncMock(
                 return_value=(
                     "alice",
-                    {"prompt": "你是爱丽丝，重视用户刚才表达的偏好。"},
+                    {
+                        "prompt": "你是爱丽丝，重视用户刚才表达的偏好。",
+                        "_begin_dialogs_processed": [
+                            {"role": "user", "content": "你喜欢怎样挑图？"},
+                            {"role": "assistant", "content": "我会重视准确性。"},
+                        ],
+                    },
                     None,
                     False,
                 )
@@ -110,6 +133,14 @@ class SessionReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("工具结果", str(call["contexts"]))
         self.assertIn("给我找刚才说的那个", str(call["contexts"]))
         self.assertNotIn("数据库旧请求", str(call["contexts"]))
+        self.assertEqual(call["contexts"][0]["content"], "你喜欢怎样挑图？")
+        self.assertEqual(
+            sum(
+                item["content"] == "你喜欢怎样挑图？"
+                for item in call["contexts"]
+            ),
+            1,
+        )
         self.assertIn("你是爱丽丝", call["system_prompt"])
         self.assertIn("Do not call tools", call["system_prompt"])
         persona_manager.resolve_selected_persona.assert_awaited_once()
@@ -162,6 +193,109 @@ class SessionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIs(result, provider)
+
+    async def test_missing_explicit_reviewer_fallback_stays_session_independent(
+        self,
+    ) -> None:
+        current_provider = object()
+        context = SimpleNamespace(
+            get_provider_by_id=Mock(
+                side_effect=lambda provider_id: (
+                    current_provider if provider_id == "current" else None
+                )
+            ),
+            get_current_chat_provider_id=AsyncMock(return_value="current"),
+        )
+        resolver = SessionReviewResolver(
+            context,
+            {"current_session_bot_enabled": True},
+        )
+
+        result = await resolver.resolve(
+            SimpleNamespace(unified_msg_origin="test:group:room"),
+            "missing-reviewer",
+            agent_run_context=SimpleNamespace(messages=[]),
+        )
+
+        self.assertIs(result, current_provider)
+        self.assertNotIsInstance(result, CurrentSessionReviewProvider)
+
+    async def test_legacy_astrbot_uses_conversation_persona_before_default(
+        self,
+    ) -> None:
+        provider = SimpleNamespace(
+            text_chat=AsyncMock(return_value=SimpleNamespace(completion_text="{}"))
+        )
+        conversation = SimpleNamespace(persona_id="alice", history="[]")
+        persona_manager = SimpleNamespace(
+            personas_v3=[
+                {
+                    "name": "alice",
+                    "prompt": "旧版当前分支爱丽丝人格",
+                    "_begin_dialogs_processed": [],
+                }
+            ],
+            get_default_persona_v3=AsyncMock(
+                return_value={"name": "default", "prompt": "全局默认人格"}
+            ),
+        )
+        context = SimpleNamespace(
+            conversation_manager=SimpleNamespace(
+                get_curr_conversation_id=AsyncMock(return_value="cid"),
+                get_conversation=AsyncMock(return_value=conversation),
+            ),
+            persona_manager=persona_manager,
+        )
+        reviewer = CurrentSessionReviewProvider(
+            provider,
+            context,
+            SimpleNamespace(unified_msg_origin="test:group:room"),
+            agent_run_context=None,
+            context_turns=4,
+        )
+
+        await reviewer.text_chat(prompt="只返回 JSON", image_urls=["base64://image"])
+
+        call = provider.text_chat.await_args.kwargs
+        self.assertIn("旧版当前分支爱丽丝人格", call["system_prompt"])
+        self.assertNotIn("全局默认人格", call["system_prompt"])
+        persona_manager.get_default_persona_v3.assert_not_awaited()
+
+    async def test_webchat_special_default_persona_is_inherited(self) -> None:
+        provider = SimpleNamespace(
+            text_chat=AsyncMock(return_value=SimpleNamespace(completion_text="{}"))
+        )
+        context = SimpleNamespace(
+            conversation_manager=SimpleNamespace(
+                get_curr_conversation_id=AsyncMock(return_value="cid"),
+                get_conversation=AsyncMock(
+                    return_value=SimpleNamespace(persona_id="", history="[]")
+                ),
+            ),
+            persona_manager=SimpleNamespace(
+                resolve_selected_persona=AsyncMock(
+                    return_value=("_chatui_default_", None, None, True)
+                )
+            ),
+            get_config=Mock(return_value={"provider_settings": {}}),
+        )
+        reviewer = CurrentSessionReviewProvider(
+            provider,
+            context,
+            SimpleNamespace(
+                unified_msg_origin="webchat:private:user",
+                get_platform_name=lambda: "webchat",
+            ),
+            agent_run_context=None,
+            context_turns=4,
+        )
+
+        await reviewer.text_chat(prompt="只返回 JSON", image_urls=["base64://image"])
+
+        self.assertIn(
+            "calm, patient friend",
+            provider.text_chat.await_args.kwargs["system_prompt"],
+        )
 
 
 if __name__ == "__main__":

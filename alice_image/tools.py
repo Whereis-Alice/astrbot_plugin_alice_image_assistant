@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
-from pydantic.dataclasses import dataclass
-
 from astrbot.api import FunctionTool
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 
 def _event_from_context(context: ContextWrapper[AstrAgentContext]):

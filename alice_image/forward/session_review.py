@@ -10,6 +10,13 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context
 
+try:
+    from astrbot.core.astr_main_agent_resources import (
+        CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT,
+    )
+except ImportError:  # AstrBot 4.16/4.17 did not expose this resource module.
+    CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT = ""
+
 _REVIEW_SYSTEM_PROMPT = """You are temporarily selecting images for the current chat.
 Use the current assistant persona and recent conversation only to understand references,
 user preferences, and the intended subject. The explicit visual-selection request has
@@ -47,10 +54,7 @@ def _content_text(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _recent_dialogue(messages: Iterable[Any], max_turns: int) -> list[dict[str, str]]:
-    if max_turns <= 0:
-        return []
-
+def _dialogue_messages(messages: Iterable[Any]) -> list[dict[str, str]]:
     dialogue: list[dict[str, str]] = []
     for message in messages:
         role = str(_message_value(message, "role", "") or "").strip().lower()
@@ -59,6 +63,14 @@ def _recent_dialogue(messages: Iterable[Any], max_turns: int) -> list[dict[str, 
         text = _content_text(_message_value(message, "content"))
         if text:
             dialogue.append({"role": role, "content": text})
+    return dialogue
+
+
+def _recent_dialogue(messages: Iterable[Any], max_turns: int) -> list[dict[str, str]]:
+    if max_turns <= 0:
+        return []
+
+    dialogue = _dialogue_messages(messages)
 
     user_turns = 0
     start = 0
@@ -70,6 +82,15 @@ def _recent_dialogue(messages: Iterable[Any], max_turns: int) -> list[dict[str, 
         if user_turns >= max_turns:
             break
     return dialogue[start:] if user_turns else []
+
+
+def _remove_leading_dialogue(
+    dialogue: list[dict[str, str]],
+    prefix: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if prefix and dialogue[: len(prefix)] == prefix:
+        return dialogue[len(prefix) :]
+    return dialogue
 
 
 class CurrentSessionReviewProvider:
@@ -117,12 +138,43 @@ class CurrentSessionReviewProvider:
             logger.debug("[AliceImageReview] 读取当前会话历史失败: %s", exc)
             return None, live_messages or []
 
-    async def _persona_prompt(self, conversation: Any | None) -> str:
+    @staticmethod
+    def _legacy_persona_by_id(manager: Any, persona_id: str) -> Any | None:
+        getter = getattr(manager, "get_persona_v3_by_id", None)
+        if callable(getter):
+            try:
+                persona = getter(persona_id)
+                if persona is not None:
+                    return persona
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "[AliceImageReview] 旧版人格按 ID 读取失败: %s",
+                    exc,
+                )
+
+        personas = getattr(manager, "personas_v3", None)
+        if not isinstance(personas, (list, tuple)):
+            return None
+        return next(
+            (
+                persona
+                for persona in personas
+                if str(_message_value(persona, "name", "") or "") == persona_id
+            ),
+            None,
+        )
+
+    async def _persona_context(
+        self,
+        conversation: Any | None,
+    ) -> tuple[str, list[dict[str, str]]]:
         manager = getattr(self._context, "persona_manager", None)
         if manager is None:
-            return ""
+            return "", []
 
         umo = getattr(self._event, "unified_msg_origin", "")
+        persona = None
+        use_webchat_special_default = False
         try:
             if hasattr(manager, "resolve_selected_persona"):
                 get_platform_name = getattr(self._event, "get_platform_name", None)
@@ -137,29 +189,52 @@ class CurrentSessionReviewProvider:
                     if hasattr(config, "get")
                     else {}
                 )
-                _, persona, _, _ = await manager.resolve_selected_persona(
+                (
+                    _,
+                    persona,
+                    _,
+                    use_webchat_special_default,
+                ) = await manager.resolve_selected_persona(
                     umo=umo,
                     conversation_persona_id=getattr(conversation, "persona_id", None),
                     platform_name=platform_name,
                     provider_settings=provider_settings,
                 )
             else:
-                persona = await manager.get_default_persona_v3(umo)
+                persona_id = str(
+                    getattr(conversation, "persona_id", "") or ""
+                ).strip()
+                if persona_id and persona_id != "[%None]":
+                    persona = self._legacy_persona_by_id(manager, persona_id)
+                if persona is None and persona_id != "[%None]":
+                    persona = await manager.get_default_persona_v3(umo)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[AliceImageReview] 解析当前会话人格失败: %s", exc)
-            return ""
+            return "", []
 
-        if isinstance(persona, dict):
-            return str(persona.get("prompt") or "").strip()
-        return str(getattr(persona, "prompt", "") or "").strip()
+        persona_prompt = str(_message_value(persona, "prompt", "") or "").strip()
+        if not persona_prompt and use_webchat_special_default:
+            persona_prompt = CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT.strip()
+
+        begin_dialogs = _message_value(persona, "_begin_dialogs_processed", [])
+        if not isinstance(begin_dialogs, (list, tuple)):
+            begin_dialogs = []
+        return persona_prompt, _dialogue_messages(begin_dialogs)
 
     async def _prepare(self) -> tuple[list[dict[str, str]], str]:
         if self._prepared is not None:
             return self._prepared
 
         conversation, messages = await self._conversation()
-        contexts = _recent_dialogue(messages, self._context_turns)
-        persona_prompt = await self._persona_prompt(conversation)
+        persona_prompt, persona_contexts = await self._persona_context(conversation)
+        dialogue = _remove_leading_dialogue(
+            _dialogue_messages(messages),
+            persona_contexts,
+        )
+        contexts = persona_contexts + _recent_dialogue(
+            dialogue,
+            self._context_turns,
+        )
         system_prompt = _REVIEW_SYSTEM_PROMPT
         if persona_prompt:
             system_prompt = (
@@ -189,7 +264,7 @@ class CurrentSessionReviewProvider:
             "prompt": prompt,
             "image_urls": image_urls,
             "func_tool": None,
-            "contexts": contexts,
+            "contexts": [dict(item) for item in contexts],
             "system_prompt": system_prompt,
             **kwargs,
         }
@@ -223,6 +298,7 @@ class SessionReviewResolver:
         log_prefix: str = "AliceImageReview",
     ) -> Any | None:
         provider_id = str(configured_provider_id or "").strip()
+        explicit_reviewer_configured = bool(provider_id)
         if provider_id:
             provider = self.context.get_provider_by_id(provider_id)
             if provider:
@@ -238,7 +314,9 @@ class SessionReviewResolver:
         provider = self.context.get_provider_by_id(current_id) if current_id else None
         if provider is None:
             return None
-        if not self.config.get("current_session_bot_enabled", True):
+        if explicit_reviewer_configured or not self.config.get(
+            "current_session_bot_enabled", True
+        ):
             return provider
         return CurrentSessionReviewProvider(
             provider,
