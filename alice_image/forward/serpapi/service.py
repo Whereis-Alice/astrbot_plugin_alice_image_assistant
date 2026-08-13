@@ -10,6 +10,7 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context
 
 from ..review import ReviewStatus
+from ..session_review import SessionReviewResolver
 from .composer import download_image
 from .forward_search import fetch_image_urls, run_tournament
 from .image_utils import HttpService
@@ -29,9 +30,15 @@ class SerpForwardResult:
 class SerpApiForwardService:
     """抓取 Google 图片候选，并可用视觉模型做淘汰赛。"""
 
-    def __init__(self, context: Context, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        context: Context,
+        config: dict[str, Any] | None = None,
+        review_resolver: SessionReviewResolver | None = None,
+    ) -> None:
         self.context = context
         self.config = config or {}
+        self.review_resolver = review_resolver or SessionReviewResolver(context)
         self.http = HttpService(
             proxy_url=str(self.config.get("proxy_url") or ""),
             user_agent=str(self.config.get("user_agent") or ""),
@@ -62,19 +69,17 @@ class SerpApiForwardService:
     def available(self) -> bool:
         return self.client.has_keys()
 
-    async def _get_vlm_provider(self, event: AstrMessageEvent):
-        if self.vlm_provider_id:
-            provider = self.context.get_provider_by_id(self.vlm_provider_id)
-            if provider:
-                return provider
-            logger.warning(
-                "[AliceImageSerpApi] 找不到审核模型 %s，回退当前会话模型",
-                self.vlm_provider_id,
-            )
-        provider_id = await self.context.get_current_chat_provider_id(
-            event.unified_msg_origin
+    async def _get_vlm_provider(
+        self,
+        event: AstrMessageEvent,
+        agent_run_context: object | None = None,
+    ):
+        return await self.review_resolver.resolve(
+            event,
+            self.vlm_provider_id,
+            agent_run_context=agent_run_context,
+            log_prefix="AliceImageSerpApi",
         )
-        return self.context.get_provider_by_id(provider_id) if provider_id else None
 
     async def search(
         self,
@@ -83,6 +88,7 @@ class SerpApiForwardService:
         description: str = "",
         review_enabled: bool = True,
         strict_match_enabled: bool = True,
+        agent_run_context: object | None = None,
     ) -> SerpForwardResult:
         query = str(query or "").strip()
         if not query:
@@ -111,7 +117,7 @@ class SerpApiForwardService:
         review_fallback = False
         review_status = ReviewStatus.NOT_RUN
         if review_enabled:
-            provider = await self._get_vlm_provider(event)
+            provider = await self._get_vlm_provider(event, agent_run_context)
             if provider is None:
                 review_fallback = True
                 review_status = ReviewStatus.ERROR

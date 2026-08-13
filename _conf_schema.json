@@ -90,9 +90,22 @@
           "provider_id": {
             "type": "string",
             "description": "审核模型",
-            "hint": "留空使用当前会话模型；模型必须支持图片输入。",
+            "hint": "留空使用当前会话模型；开启“当前会话 Bot 筛图”时还会继承当前人格与近期对话。模型必须支持图片输入。",
             "_special": "select_provider",
             "default": ""
+          },
+          "current_session_bot_enabled": {
+            "type": "bool",
+            "description": "当前会话 Bot 筛图",
+            "hint": "审核模型留空时，由当前会话模型结合当前人格和近期对话理解用户意图。筛图请求不带任何工具，不会递归调用找图。",
+            "default": true
+          },
+          "current_session_context_turns": {
+            "type": "int",
+            "description": "筛图继承的近期对话轮数",
+            "hint": "只用于理解指代和偏好，不会改写会话历史；设为 0 时仅继承当前人格。",
+            "default": 4,
+            "slider": {"min": 0, "max": 20, "step": 1}
           },
           "fail_open": {
             "type": "bool",

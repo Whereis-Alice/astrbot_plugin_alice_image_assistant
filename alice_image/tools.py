@@ -83,6 +83,7 @@ class AliceFindImageTool(FunctionTool[AstrAgentContext]):
             is_explanation=bool(kwargs.get("is_explanation", False)),
             artist_name=kwargs.get("artist_name", ""),
             pixiv_user_id=kwargs.get("pixiv_user_id", ""),
+            agent_run_context=context,
         )
 
 

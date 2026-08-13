@@ -198,6 +198,34 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.attempted_sources, ["soutu"])
         self.assertEqual(pixiv.calls, 0)
 
+    async def test_agent_run_context_is_forwarded_to_selected_source(self) -> None:
+        pixiv, soutu, serp = _Pixiv(False), _Soutu(False), _Serp(True)
+        soutu.last_kwargs = {}
+
+        async def soutu_search(*_args, **kwargs):
+            soutu.last_kwargs = kwargs
+            return SimpleNamespace(
+                image_bytes=b"image",
+                error="",
+                review_fallback=False,
+                review_status=ReviewStatus.MATCHED,
+            )
+
+        soutu.search = soutu_search
+        service = ForwardSearchOrchestrator(_config(), pixiv, soutu, serp)
+        run_context = object()
+
+        result = await service.search(
+            _Event(),
+            "雪山",
+            "雪山日出",
+            "soutu",
+            agent_run_context=run_context,
+        )
+
+        self.assertTrue(result.success)
+        self.assertIs(soutu.last_kwargs["agent_run_context"], run_context)
+
     async def test_pixiv_found_but_send_timeout_does_not_fallback(self) -> None:
         pixiv = _PixivFoundButSendTimeout()
         soutu, serp = _Soutu(True), _Serp(True)

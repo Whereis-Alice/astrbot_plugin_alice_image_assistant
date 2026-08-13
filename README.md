@@ -118,7 +118,7 @@ python -m playwright install chromium
 - `llm_search_progress_message_enabled`：控制 LLM 自主找图前是否发送“正在为你寻找...”这类前置提示；默认关闭，只保留最终图片或失败结果。
 - `tool_send_wait_timeout_seconds`：LLM 工具等待平台发图确认的最长秒数；默认 45，设为 `0` 表示一直等待。
 - `auto_source_enabled`、`default_source`、`fallback_enabled`、`fallback_order`：控制自动选源与回退策略。
-- `llm_review`：控制视觉审核、审核模型和候选数量。`strict_match_enabled` 默认拒绝发送视觉模型明确否决的候选；`fail_open` 只决定审核模型不可用、超时或解析失败时是否放行首图。
+- `llm_review`：控制视觉审核、审核模型和候选数量。审核模型留空且 `current_session_bot_enabled` 开启时，当前 Bot 会结合当前人格与最近几轮对话筛选候选；这次筛选不带工具，不会递归找图，也不会写入聊天历史。`strict_match_enabled` 默认拒绝发送视觉模型明确否决的候选；`fail_open` 只决定审核模型不可用、超时或解析失败时是否放行首图。
 - `pixiv`：有模块总开关、各项功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。
 - `pixiv.settings.return_count`：Pixiv 指令默认返回作品数。`/aaP`、`/aaP画师作` 和 `/aaP画师随` 末尾的数量可只覆盖本次调用，不会修改配置。
 - `pixiv.settings.randomize_search_results`：默认随机抽取多候选 Pixiv 结果；`recent_dedup_enabled` 会按群聊或私聊避开近期已发作品。作品 ID 和链接直取不受影响，候选全部用完时会自动复用旧作品。

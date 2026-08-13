@@ -16,6 +16,7 @@ from .alice_image.config import NestedConfigProxy, as_dict, section
 from .alice_image.forward.orchestrator import ForwardSearchOrchestrator
 from .alice_image.forward.pixiv_search import PixivForwardSearchService
 from .alice_image.forward.serpapi.service import SerpApiForwardService
+from .alice_image.forward.session_review import SessionReviewResolver
 from .alice_image.forward.soutu.service import SoutuSearchService
 from .alice_image.pixiv.controller import AlicePixivController
 from .alice_image.reverse.controller import AliceReverseController
@@ -28,7 +29,7 @@ from .alice_image.tools import (
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.4.1"
+PLUGIN_VERSION = "1.5.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 
@@ -57,6 +58,8 @@ class AliceImageAssistantPlugin(Star):
         serpapi: SerpApiForwardService | None = None
 
         if self.find_config.get("enabled", True):
+            review = section(self.find_config, "llm_review")
+            review_resolver = SessionReviewResolver(context, review)
             pixiv_config = section(self.find_config, "pixiv")
             pixiv_features = section(pixiv_config, "features")
             if pixiv_config.get("enabled", True):
@@ -70,16 +73,20 @@ class AliceImageAssistantPlugin(Star):
                     features=pixiv_features,
                 )
                 if pixiv_features.get("llm_search", True):
-                    review = section(self.find_config, "llm_review")
                     pixiv_forward = PixivForwardSearchService(
                         context,
                         self.pixiv,
                         review_config=review,
+                        review_resolver=review_resolver,
                     )
 
             soutu_config = section(self.find_config, "soutu")
             if soutu_config.get("enabled", True):
-                soutu = SoutuSearchService(context, soutu_config)
+                soutu = SoutuSearchService(
+                    context,
+                    soutu_config,
+                    review_resolver=review_resolver,
+                )
 
             serpapi_config = section(self.find_config, "serpapi")
             if not serpapi_config.get("serpapi_keys"):
@@ -89,7 +96,11 @@ class AliceImageAssistantPlugin(Star):
                 if reverse_keys:
                     serpapi_config["serpapi_keys"] = reverse_keys
             if serpapi_config.get("enabled", True):
-                serpapi = SerpApiForwardService(context, serpapi_config)
+                serpapi = SerpApiForwardService(
+                    context,
+                    serpapi_config,
+                    review_resolver=review_resolver,
+                )
 
             self.forward = ForwardSearchOrchestrator(
                 self.find_config,
@@ -305,6 +316,7 @@ class AliceImageAssistantPlugin(Star):
         is_explanation: bool,
         artist_name: str = "",
         pixiv_user_id: str = "",
+        agent_run_context: Any | None = None,
     ) -> str:
         if not self.find_config.get("enabled", True) or not self.find_config.get(
             "llm_tools_enabled", True
@@ -336,6 +348,7 @@ class AliceImageAssistantPlugin(Star):
             for_command=False,
             artist_name=artist_name,
             pixiv_user_id=pixiv_user_id,
+            agent_run_context=agent_run_context,
         )
         return outcome.to_json()
 

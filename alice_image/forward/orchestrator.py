@@ -253,6 +253,7 @@ class ForwardSearchOrchestrator:
         for_command: bool = False,
         artist_name: str = "",
         pixiv_user_id: str | int = "",
+        agent_run_context: Any | None = None,
     ) -> ForwardOutcome:
         outcome = ForwardOutcome()
         query = str(query or "").strip()
@@ -308,6 +309,7 @@ class ForwardSearchOrchestrator:
                         send_wait_timeout_seconds=send_wait_timeout_seconds,
                         artist_name=artist_name,
                         pixiv_user_id=pixiv_user_id,
+                        agent_run_context=agent_run_context,
                     )
                     if result.success:
                         outcome.success = True
@@ -349,6 +351,7 @@ class ForwardSearchOrchestrator:
                         description or query,
                         use_vlm_selection=use_vlm,
                         strict_match_enabled=strict_match_enabled,
+                        agent_run_context=agent_run_context,
                     )
                     review_status = review_status_value(
                         getattr(result, "review_status", ReviewStatus.NOT_RUN)
@@ -413,6 +416,7 @@ class ForwardSearchOrchestrator:
                         description or query,
                         review_enabled=use_vlm,
                         strict_match_enabled=strict_match_enabled,
+                        agent_run_context=agent_run_context,
                     )
                     review_status = review_status_value(
                         getattr(result, "review_status", ReviewStatus.NOT_RUN)

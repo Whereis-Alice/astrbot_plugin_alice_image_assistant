@@ -113,6 +113,17 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertEqual(soutu["review_rounds"]["default"], 3)
         self.assertTrue(soutu["vlm_selection_enabled"]["default"])
 
+    def test_current_session_bot_review_defaults_are_bounded(self) -> None:
+        schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
+        review = schema["find_image"]["items"]["llm_review"]["items"]
+
+        self.assertTrue(review["current_session_bot_enabled"]["default"])
+        self.assertEqual(review["current_session_context_turns"]["default"], 4)
+        self.assertEqual(
+            review["current_session_context_turns"]["slider"],
+            {"min": 0, "max": 20, "step": 1},
+        )
+
     def test_artist_random_blocked_tags_match_exact_name_or_translation(self) -> None:
         item = SimpleNamespace(
             tags=[

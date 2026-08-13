@@ -6,15 +6,15 @@ from __future__ import annotations
 import asyncio
 import io
 from dataclasses import dataclass
-from typing import Optional
 
-from PIL import Image, UnidentifiedImageError
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import Provider
 from astrbot.api.star import Context
+from PIL import Image, UnidentifiedImageError
 
 from ..review import ReviewStatus
+from ..session_review import SessionReviewResolver
 from .composer import ComposerManager
 from .scraper import ScraperManager
 from .vlm import select_best_image_index
@@ -39,9 +39,15 @@ class SoutuForwardResult:
 
 
 class SoutuSearchService:
-    def __init__(self, context: Context, config: dict | None = None):
+    def __init__(
+        self,
+        context: Context,
+        config: dict | None = None,
+        review_resolver: SessionReviewResolver | None = None,
+    ):
         self.context = context
         self.config = config or {}
+        self.review_resolver = review_resolver or SessionReviewResolver(context)
         self.scraper_mgr = ScraperManager()
         self.composer_mgr = ComposerManager()
         self._vlm_semaphore = asyncio.Semaphore(2)
@@ -60,21 +66,17 @@ class SoutuSearchService:
             value = default
         return max(minimum, min(maximum, value))
 
-    async def _get_vlm_provider(self, event: AstrMessageEvent) -> Optional[Provider]:
-        provider_id = str(self.config.get("vlm_provider_id") or "").strip()
-        if provider_id:
-            provider = self.context.get_provider_by_id(provider_id)
-            if provider:
-                return provider
-
-        umo = getattr(event, "unified_msg_origin", None)
-        if umo:
-            curr_id = await self.context.get_current_chat_provider_id(umo)
-            if curr_id:
-                provider = self.context.get_provider_by_id(curr_id)
-                if provider:
-                    return provider
-        return None
+    async def _get_vlm_provider(
+        self,
+        event: AstrMessageEvent,
+        agent_run_context: object | None = None,
+    ) -> Provider | None:
+        return await self.review_resolver.resolve(
+            event,
+            str(self.config.get("vlm_provider_id") or ""),
+            agent_run_context=agent_run_context,
+            log_prefix="AliceImageSoutu",
+        )
 
     def _validate_and_hash_sync(
         self, img_bytes: bytes, min_res: int
@@ -212,6 +214,7 @@ class SoutuSearchService:
         description: str = "",
         use_vlm_selection: bool = True,
         strict_match_enabled: bool = True,
+        agent_run_context: object | None = None,
     ) -> SoutuForwardResult:
         eval_desc = description.strip() or keyword
         batch_size = self._bounded_int("batch_size", 9, 1, 16)
@@ -271,7 +274,7 @@ class SoutuSearchService:
                 image_url=image_url,
             )
 
-        provider = await self._get_vlm_provider(event)
+        provider = await self._get_vlm_provider(event, agent_run_context)
         if provider is None:
             items = await next_batch()
             if not items:

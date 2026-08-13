@@ -24,9 +24,10 @@ from ..pixiv.utils.tag import (
     process_and_send_illusts_sorted,
     validate_and_process_tags,
 )
-from .serpapi.vlm import select_from_collage
-from .soutu.composer import ComposerManager
 from .review import ReviewStatus
+from .serpapi.vlm import select_from_collage
+from .session_review import SessionReviewResolver
+from .soutu.composer import ComposerManager
 
 
 @dataclass(slots=True)
@@ -58,10 +59,14 @@ class PixivForwardSearchService:
         context: Context,
         controller: AlicePixivController,
         review_config: dict[str, Any] | None = None,
+        review_resolver: SessionReviewResolver | None = None,
     ) -> None:
         self.context = context
         self.controller = controller
         self.review_config = review_config or {}
+        self.review_resolver = review_resolver or SessionReviewResolver(
+            context, self.review_config
+        )
         self._collage = ComposerManager()
         self._review_lock = asyncio.Semaphore(
             self._bounded_int("max_concurrency", 2, 1, 8)
@@ -128,20 +133,17 @@ class PixivForwardSearchService:
         except Exception as exc:  # noqa: BLE001
             return False, True, str(exc)
 
-    async def _provider(self, event: AstrMessageEvent):
-        provider_id = str(self.review_config.get("provider_id") or "").strip()
-        if provider_id:
-            provider = self.context.get_provider_by_id(provider_id)
-            if provider:
-                return provider
-            logger.warning(
-                "[AliceImagePixiv] 找不到审核模型 %s，回退当前会话模型",
-                provider_id,
-            )
-        current_id = await self.context.get_current_chat_provider_id(
-            event.unified_msg_origin
+    async def _provider(
+        self,
+        event: AstrMessageEvent,
+        agent_run_context: Any | None = None,
+    ):
+        return await self.review_resolver.resolve(
+            event,
+            str(self.review_config.get("provider_id") or ""),
+            agent_run_context=agent_run_context,
+            log_prefix="AliceImagePixiv",
         )
-        return self.context.get_provider_by_id(current_id) if current_id else None
 
     @staticmethod
     def _preview_url(item: Any) -> str:
@@ -469,8 +471,9 @@ class PixivForwardSearchService:
         items: list[Any],
         description: str,
         count: int,
+        agent_run_context: Any | None = None,
     ) -> tuple[list[Any], ReviewStatus, str]:
-        provider = await self._provider(event)
+        provider = await self._provider(event, agent_run_context)
         fail_open = bool(self.review_config.get("fail_open", True))
         if provider is None:
             if fail_open:
@@ -547,6 +550,7 @@ class PixivForwardSearchService:
         send_wait_timeout_seconds: float = 0,
         artist_name: str = "",
         pixiv_user_id: str | int = "",
+        agent_run_context: Any | None = None,
     ) -> PixivForwardResult:
         if not await self.controller.client_wrapper.authenticate():
             return PixivForwardResult(
@@ -610,6 +614,7 @@ class PixivForwardSearchService:
                 candidates,
                 description.strip(),
                 count,
+                agent_run_context,
             )
             if error:
                 return PixivForwardResult(error=error, review_status=review_status)
