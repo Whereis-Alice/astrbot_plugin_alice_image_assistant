@@ -67,8 +67,8 @@ class SoutuReviewTests(unittest.IsolatedAsyncioTestCase):
 
         result = await service.search(
             SimpleNamespace(unified_msg_origin="test"),
-            "?? ????",
-            "???? ???? ??",
+            "海狸 真实照片",
+            "野生海狸 真实动物 照片",
         )
 
         self.assertEqual(result.image_bytes, b"four")
@@ -84,25 +84,25 @@ class SoutuReviewTests(unittest.IsolatedAsyncioTestCase):
 
         result = await service.search(
             SimpleNamespace(unified_msg_origin="test"),
-            "?? ????",
-            "???? ???? ??",
+            "海狸 真实照片",
+            "野生海狸 真实动物 照片",
         )
 
         self.assertIsNone(result.image_bytes)
         self.assertEqual(result.review_status, ReviewStatus.NO_MATCH)
         self.assertEqual(result.reviewed_count, 6)
-        self.assertIn("???????", result.error)
+        self.assertIn("均与描述不匹配", result.error)
 
     async def test_review_error_keeps_candidate_only_for_fail_open_decision(self) -> None:
         service = self._service()
         service._vlm_selection = AsyncMock(
-            return_value=(ReviewStatus.ERROR, "", b"", "????")
+            return_value=(ReviewStatus.ERROR, "", b"", "审核超时")
         )
 
         result = await service.search(
             SimpleNamespace(unified_msg_origin="test"),
-            "?? ????",
-            "???? ???? ??",
+            "海狸 真实照片",
+            "野生海狸 真实动物 照片",
         )
 
         self.assertEqual(result.image_bytes, b"one")
@@ -143,8 +143,8 @@ class SoutuReviewTests(unittest.IsolatedAsyncioTestCase):
 
         result = await service.search(
             SimpleNamespace(unified_msg_origin="test"),
-            "??",
-            "????????",
+            "海狸",
+            "野生海狸真实照片",
         )
 
         second_items = service._vlm_selection.await_args_list[1].args[1]
@@ -201,8 +201,8 @@ class SerpApiReviewTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await service.search(
                 SimpleNamespace(unified_msg_origin="test"),
-                "??",
-                "????????",
+                "海狸",
+                "野生海狸真实照片",
             )
         await service.close()
 
@@ -229,8 +229,8 @@ class SerpApiReviewTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await service.search(
                 SimpleNamespace(unified_msg_origin="test"),
-                "??",
-                "????????",
+                "海狸",
+                "野生海狸真实照片",
             )
         await service.close()
 
@@ -246,20 +246,20 @@ class VlmParsingTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        selected = await select_from_collage(b"image", "??", 2, provider, 1)
+        selected = await select_from_collage(b"image", "海狸", 2, provider, 1)
 
         self.assertEqual(selected, [])
 
     async def test_unparseable_response_is_a_review_error(self) -> None:
         provider = SimpleNamespace(
-            text_chat=AsyncMock(return_value=SimpleNamespace(completion_text="???"))
+            text_chat=AsyncMock(return_value=SimpleNamespace(completion_text="不知道"))
         )
         with patch(
             "astrbot_plugin_alice_image_assistant.alice_image.forward.serpapi.vlm.asyncio.sleep",
             AsyncMock(),
         ):
             with self.assertRaises(VlmReviewError):
-                await select_from_collage(b"image", "??", 2, provider, 1)
+                await select_from_collage(b"image", "海狸", 2, provider, 1)
 
     async def test_nonempty_invalid_indices_are_review_errors(self) -> None:
         for response_text in (
@@ -278,7 +278,7 @@ class VlmParsingTests(unittest.IsolatedAsyncioTestCase):
                     AsyncMock(),
                 ):
                     with self.assertRaises(VlmReviewError):
-                        await select_from_collage(b"image", "??", 2, provider, 1)
+                        await select_from_collage(b"image", "海狸", 2, provider, 1)
 
 
 if __name__ == "__main__":

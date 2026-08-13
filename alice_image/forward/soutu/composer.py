@@ -35,7 +35,7 @@ class SafeResolver(aiohttp.DefaultResolver):
                     or getattr(ip, "is_reserved", False)
                     or ip.is_unspecified
                 ):
-                    raise SSRFInterceptError("??????????")
+                    raise SSRFInterceptError("检测到受限网络地址。")
             except ValueError:
                 pass
         return resolved
@@ -242,7 +242,7 @@ class ComposerManager:
         valid_items.sort(key=lambda item: input_order.get(item[0], len(urls)))
         return valid_items
 
-    # ?? ??????????? main.py ????
+    # 🚀 补回遗失的救命方法，供 main.py 异步调用
     async def create_collage_from_items(
         self, items: List[Tuple[str, bytes]]
     ) -> Tuple[Optional[bytes], List[Tuple[str, bytes]]]:

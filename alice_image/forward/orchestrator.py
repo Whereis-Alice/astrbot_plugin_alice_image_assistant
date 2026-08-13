@@ -1,4 +1,4 @@
-"""?????????????????"""
+"""统一文字找图、自动选源与失败回退。"""
 
 from __future__ import annotations
 
@@ -22,15 +22,15 @@ _REAL_IMAGE_AUTO_ORDER = ("soutu", "serpapi", "pixiv")
 _LEGACY_FALLBACK_ORDER = ("pixiv", "soutu", "serpapi")
 _PIXIV_HINTS = (
     "pixiv",
-    "p?",
-    "???",
-    "??",
-    "??",
-    "??",
-    "??",
-    "??",
-    "??",
-    "??",
+    "p站",
+    "二次元",
+    "动漫",
+    "动画",
+    "插画",
+    "角色",
+    "同人",
+    "壁纸",
+    "立绘",
     "vtuber",
     "vocaloid",
 )
@@ -56,23 +56,23 @@ class ForwardOutcome:
     def to_json(self) -> str:
         payload = asdict(self)
         if self.success and self.message_sent:
-            instruction = "??????????????????????????"
+            instruction = "图片已发送，请简短说明使用的来源；不要虚构图片内容。"
         elif self.success and self.delivery_uncertain:
             instruction = (
-                "???????????????????????????"
-                "??????????????????????????????????"
+                "图片来源已找到并已尝试发送，但平台发送确认超时或失败；"
+                "请简短告知用户发送状态不确定，不要切换其它图源，也不要虚构图片内容。"
             )
         elif self.success and self.send_attempted:
             instruction = (
-                "??????????????????????????????????"
+                "图片来源已找到并已尝试发送；请简短说明使用的来源，不要虚构图片内容。"
             )
         elif self.success:
             instruction = (
-                "?????????????????????"
-                "?????????????????????????"
+                "图片来源已找到，但当前配置不自动发送图片；"
+                "请简短说明使用的来源和可用结果，不要虚构图片内容。"
             )
         else:
-            instruction = "??? errors ??????????????????????"
+            instruction = "请根据 errors 向用户说明失败原因，并建议调整关键词或配置。"
         payload["instruction"] = instruction
         return json.dumps(payload, ensure_ascii=False)
 
@@ -122,7 +122,7 @@ class ForwardSearchOrchestrator:
     def _configured_fallback_order(self) -> list[str]:
         raw = self.config.get("fallback_order", ["soutu", "serpapi", "pixiv"])
         if isinstance(raw, str):
-            raw = re.split(r"[,?;?\s]+", raw)
+            raw = re.split(r"[,，;；\s]+", raw)
         if not isinstance(raw, list):
             raw = []
         normalized = [str(item).strip().lower() for item in raw]
@@ -188,10 +188,10 @@ class ForwardSearchOrchestrator:
                 return
             try:
                 done_task.result()
-                logger.info("[AliceImageForward] ?? %s ??????????", source)
+                logger.info("[AliceImageForward] 来源 %s 后台发送任务已完成。", source)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "[AliceImageForward] ?? %s ??????????: %s",
+                    "[AliceImageForward] 来源 %s 后台发送任务最终失败: %s",
                     source,
                     exc,
                 )
@@ -217,7 +217,7 @@ class ForwardSearchOrchestrator:
             self._track_background_send(source, task)
             return (
                 False,
-                f"?????? {timeout_seconds:g} ???????????????",
+                f"发送等待超过 {timeout_seconds:g} 秒，已转入后台继续等待平台确认",
             )
 
     async def _send_image_bytes(
@@ -236,7 +236,7 @@ class ForwardSearchOrchestrator:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "[AliceImageForward] ?? %s ??????????: %s",
+                "[AliceImageForward] 来源 %s 已找到图片但发送失败: %s",
                 source,
                 exc,
             )
@@ -260,7 +260,7 @@ class ForwardSearchOrchestrator:
         pixiv_user_id = str(pixiv_user_id or "").strip()
         artist_scoped = bool(artist_name or pixiv_user_id)
         if not query and not artist_scoped:
-            outcome.errors["request"] = "??????????"
+            outcome.errors["request"] = "搜索关键词不能为空。"
             return outcome
         try:
             count = max(1, min(int(count), 5))
@@ -288,9 +288,9 @@ class ForwardSearchOrchestrator:
             sources = self.choose_sources(query, source)
         if not sources:
             outcome.errors["configuration"] = (
-                "????????????? Pixiv ???"
+                "指定画师找图需要启用并配置 Pixiv 来源。"
                 if artist_scoped
-                else "????????????????"
+                else "没有已启用且配置完整的找图来源。"
             )
             return outcome
 
@@ -336,7 +336,7 @@ class ForwardSearchOrchestrator:
                         if result.error:
                             outcome.warnings[current] = result.error
                         return outcome
-                    outcome.errors[current] = result.error or "Pixiv ?????"
+                    outcome.errors[current] = result.error or "Pixiv 找图失败。"
 
                 elif current == "soutu" and self.soutu:
                     source_cfg = self._source_config(current)
@@ -361,11 +361,11 @@ class ForwardSearchOrchestrator:
                         outcome.errors[current] = (
                             result.error or ""
                         )
-                        if "???" not in outcome.errors[current]:
+                        if "不匹配" not in outcome.errors[current]:
                             outcome.errors[current] = (
-                                f"{outcome.errors[current]}?"
-                                "??????????????????????"
-                            ).lstrip("?")
+                                f"{outcome.errors[current]}；"
+                                "视觉审核明确判定当前来源候选均与描述不匹配。"
+                            ).lstrip("；")
                     elif result.image_bytes:
                         if (
                             use_vlm
@@ -373,7 +373,7 @@ class ForwardSearchOrchestrator:
                             and not review_fail_open
                         ):
                             outcome.errors[current] = (
-                                "????????????????????????"
+                                "视觉审核模型不可用或调用失败，按配置不放行首图。"
                             )
                         else:
                             if send_images:
@@ -392,14 +392,14 @@ class ForwardSearchOrchestrator:
                             outcome.delivery_uncertain = send_images and not sent
                             if send_error:
                                 outcome.warnings[current] = (
-                                    "??????????????????????????????"
-                                    f"?????????{send_error}"
+                                    "来源已找到图片，但平台发送确认超时或失败；不会切换其它图源。"
+                                    f"最后一次发送错误：{send_error}"
                                 )
                             outcome.review_fallback = result.review_fallback
                             return outcome
                     else:
                         outcome.errors[current] = (
-                            result.error or "???????????"
+                            result.error or "搜图神器来源没有结果。"
                         )
 
                 elif current == "serpapi" and self.serpapi:
@@ -425,11 +425,11 @@ class ForwardSearchOrchestrator:
                         outcome.errors[current] = (
                             result.error or ""
                         )
-                        if "???" not in outcome.errors[current]:
+                        if "不匹配" not in outcome.errors[current]:
                             outcome.errors[current] = (
-                                f"{outcome.errors[current]}?"
-                                "???????? SerpApi ??????????"
-                            ).lstrip("?")
+                                f"{outcome.errors[current]}；"
+                                "视觉审核明确判定 SerpApi 候选均与描述不匹配。"
+                            ).lstrip("；")
                     elif result.image_bytes:
                         if (
                             use_vlm
@@ -437,7 +437,7 @@ class ForwardSearchOrchestrator:
                             and not review_fail_open
                         ):
                             outcome.errors[current] = (
-                                "????????????????????????"
+                                "视觉审核模型不可用或调用失败，按配置不放行首图。"
                             )
                         else:
                             if send_images:
@@ -456,16 +456,16 @@ class ForwardSearchOrchestrator:
                             outcome.delivery_uncertain = send_images and not sent
                             if send_error:
                                 outcome.warnings[current] = (
-                                    "??????????????????????????????"
-                                    f"?????????{send_error}"
+                                    "来源已找到图片，但平台发送确认超时或失败；不会切换其它图源。"
+                                    f"最后一次发送错误：{send_error}"
                                 )
                             outcome.review_fallback = result.review_fallback
                             return outcome
                     else:
-                        outcome.errors[current] = result.error or "SerpApi ?????"
+                        outcome.errors[current] = result.error or "SerpApi 没有结果。"
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "[AliceImageForward] ?? %s ????: %s",
+                    "[AliceImageForward] 来源 %s 执行异常: %s",
                     current,
                     exc,
                     exc_info=True,

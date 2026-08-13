@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""?????????????????"""
+"""搜图神器文字搜图与渐进式视觉筛选。"""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class SoutuSearchService:
     async def terminate(self) -> None:
         await self.scraper_mgr.close_all()
         await self.composer_mgr.close_all()
-        logger.info("SouTuShenQi ?????????")
+        logger.info("SouTuShenQi 插件资源回收完成。")
 
     def _bounded_int(
         self, key: str, default: int, minimum: int, maximum: int
@@ -159,7 +159,7 @@ class SoutuSearchService:
             items
         )
         if not collage_bytes or not valid_items:
-            return ReviewStatus.ERROR, "", b"", "????????????????"
+            return ReviewStatus.ERROR, "", b"", "图像组合处理失败，候选数据损坏。"
 
         async with self._vlm_semaphore:
             best_idx = await select_best_image_index(
@@ -169,7 +169,7 @@ class SoutuSearchService:
         if best_idx == -1:
             return ReviewStatus.NO_MATCH, "", b"", ""
         if best_idx == -2 or not 0 <= best_idx < len(valid_items):
-            return ReviewStatus.ERROR, "", b"", "??????????????"
+            return ReviewStatus.ERROR, "", b"", "视觉审核模型调用或解析失败。"
 
         final_url, final_bytes = valid_items[best_idx]
         return ReviewStatus.MATCHED, final_url, final_bytes, ""
@@ -263,7 +263,7 @@ class SoutuSearchService:
             if not items:
                 return SoutuForwardResult(
                     error=primary_error
-                    or "????????????????????"
+                    or "未找到符合分辨率要求且可访问的图像资源。"
                 )
             image_url, image_bytes = items[0]
             return SoutuForwardResult(
@@ -277,11 +277,11 @@ class SoutuSearchService:
             if not items:
                 return SoutuForwardResult(
                     error=primary_error
-                    or "????????????????????",
+                    or "未找到符合分辨率要求且可访问的图像资源。",
                     review_status=ReviewStatus.ERROR,
                 )
             image_url, image_bytes = items[0]
-            logger.warning("?????????????????????? fail_open ???")
+            logger.warning("搜图神器未找到可用视觉模型，保留首图候选等待 fail_open 决策。")
             return SoutuForwardResult(
                 image_bytes=await self._format_image(image_bytes),
                 image_url=image_url,
@@ -301,7 +301,7 @@ class SoutuSearchService:
 
             reviewed_count += len(items)
             logger.info(
-                "??????? %s/%s ???????? %s ????",
+                "搜图神器开始第 %s/%s 轮视觉筛选，本轮 %s 张候选。",
                 round_index,
                 review_rounds,
                 len(items),
@@ -311,7 +311,7 @@ class SoutuSearchService:
             )
             if status is ReviewStatus.MATCHED:
                 logger.info(
-                    "????? %s ???????????? %s ????",
+                    "搜图神器第 %s 轮找到匹配图片，累计审核 %s 张候选。",
                     round_index,
                     reviewed_count,
                 )
@@ -324,7 +324,7 @@ class SoutuSearchService:
             if status is ReviewStatus.ERROR:
                 fallback_url, fallback_bytes = items[0]
                 logger.warning(
-                    "??????????????????????? fail_open ???%s",
+                    "搜图神器视觉审核发生技术错误，保留首图候选等待 fail_open 决策：%s",
                     error,
                 )
                 return SoutuForwardResult(
@@ -337,7 +337,7 @@ class SoutuSearchService:
                 )
 
             logger.info(
-                "????? %s ?????????????????",
+                "搜图神器第 %s 轮候选均不匹配，继续检查后续候选。",
                 round_index,
             )
 
@@ -345,7 +345,7 @@ class SoutuSearchService:
             if not strict_match_enabled and first_candidate is not None:
                 image_url, image_bytes = first_candidate
                 logger.warning(
-                    "??????????????????????????????"
+                    "搜图神器严格匹配已关闭，视觉审核无匹配后按配置放行首图候选。"
                 )
                 return SoutuForwardResult(
                     image_bytes=await self._format_image(image_bytes),
@@ -355,16 +355,16 @@ class SoutuSearchService:
                     reviewed_count=reviewed_count,
                 )
             logger.info(
-                "???????? %s ???????????????????",
+                "搜图神器累计审核 %s 张候选后仍无匹配结果，不发送候选首图。",
                 reviewed_count,
             )
             return SoutuForwardResult(
-                error=f"??????? {reviewed_count} ????????????",
+                error=f"视觉审核已检查 {reviewed_count} 张候选，均与描述不匹配。",
                 review_fallback=True,
                 review_status=ReviewStatus.NO_MATCH,
                 reviewed_count=reviewed_count,
             )
 
         return SoutuForwardResult(
-            error=primary_error or "????????????????????"
+            error=primary_error or "未找到符合分辨率要求且可访问的图像资源。"
         )

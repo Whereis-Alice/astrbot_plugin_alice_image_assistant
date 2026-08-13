@@ -1,4 +1,4 @@
-"""VLM ????????????????????????"""
+"""VLM 选图：把网格拼接图交给视觉模型，返回选中的编号。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import re
 from astrbot.api import logger
 from astrbot.api.provider import Provider
 
-# ??????????????? >10 ???????? 1 ??
+# 单张拼图保留的图片比例（候选数 >10 时按比例取，至少 1 张）
 SELECTION_RATIO = 0.12
 
 
@@ -21,10 +21,10 @@ class VlmReviewError(RuntimeError):
 def _normalize_indices(
     raw: list[int], total_images_count: int, max_selection: int
 ) -> list[int]:
-    """?????????????????????? max_selection ??
+    """把原始编号裁剪到合法范围、保序去重，并截断到 max_selection 张。
 
-    VLM ????? prompt ?????????????????"????"? max_selection
-    ???????????"???"???????????
+    VLM 不一定遵守 prompt 的数量约束，故在输出端强制裁剪——"该选几张"以 max_selection
+    为唯一可信来源（决赛圈"砍一半"的收敛逻辑依赖于此）。
     """
     valid = [n for n in raw if 1 <= n <= total_images_count]
     return list(dict.fromkeys(valid))[:max_selection]
@@ -42,7 +42,7 @@ def _validated_indices(
     ]
     normalized = _normalize_indices(parsed, total_images_count, max_selection)
     if not normalized:
-        raise ValueError("selected_indices ??????????????")
+        raise ValueError("selected_indices 非空，但没有合法的候选编号。")
     return normalized
 
 
@@ -53,10 +53,10 @@ async def select_from_collage(
     vlm_provider: Provider,
     max_selection: int | None = None,
 ) -> list[int]:
-    """? VLM ??????????????? 1-based ???????? 1..total_images_count??
+    """让 VLM 从网格图中挑选匹配的图片，返回 1-based 编号列表（裁剪到 1..total_images_count）。
 
-    ``max_selection`` ???????????????????????????
-    SELECTION_RATIO ?????"????"???????
+    ``max_selection`` 为本批最大选出张数：调用方显式指定时以其为准，留空则按
+    SELECTION_RATIO 估算，确保"该选几张"只有单一来源。
     """
     base64_str = base64.b64encode(image_bytes).decode("utf-8")
     image_url = f"base64://{base64_str}"
@@ -95,7 +95,7 @@ async def select_from_collage(
             if not result and getattr(response, "result_chain", None) is not None:
                 result = response.result_chain.get_plain_text()
             result = str(result or "").strip()
-            logger.debug(f"[alice_image_serpapi] VLM ????: '{result}'")
+            logger.debug(f"[alice_image_serpapi] VLM 原始响应: '{result}'")
 
             try:
                 json_match = re.search(r"\{.*\}", result, re.DOTALL)
@@ -107,7 +107,7 @@ async def select_from_collage(
                             selected, total_images_count, max_selection
                         )
             except (json.JSONDecodeError, AttributeError, TypeError):
-                logger.debug("[alice_image_serpapi] VLM JSON ???????????")
+                logger.debug("[alice_image_serpapi] VLM JSON 解析失败，改用正则兜底")
 
             fallback = re.search(
                 r'["\']?selected_indices["\']?\s*:\s*\[([^\]]*)\]',
@@ -120,19 +120,19 @@ async def select_from_collage(
                     return []
                 numbers = [int(n) for n in re.findall(r"-?\d+", content)]
                 if not numbers:
-                    raise ValueError("selected_indices ???????????????")
+                    raise ValueError("selected_indices 非空，但没有可解析的候选编号。")
                 return _validated_indices(
                     numbers, total_images_count, max_selection
                 )
 
-            raise ValueError("VLM ????????? selected_indices ???")
+            raise ValueError("VLM 响应未包含可解析的 selected_indices 列表。")
 
-        except Exception as e:  # noqa: BLE001 - ??
+        except Exception as e:  # noqa: BLE001 - 重试
             logger.warning(
-                f"[alice_image_serpapi] VLM ??? {attempt + 1}/{retries} ???: {e}"
+                f"[alice_image_serpapi] VLM 调用第 {attempt + 1}/{retries} 次失败: {e}"
             )
             if attempt < retries - 1:
                 await asyncio.sleep(2)
 
-    logger.error("[alice_image_serpapi] VLM ?????????")
-    raise VlmReviewError("????????????????")
+    logger.error("[alice_image_serpapi] VLM 调用或解析全部失败")
+    raise VlmReviewError("视觉审核模型调用或响应解析失败。")

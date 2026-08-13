@@ -170,8 +170,8 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
 
         result = await service.search(
             event,
-            "??",
-            "????",
+            "角色",
+            "精确描述",
             count=1,
             send_images=False,
         )
@@ -197,21 +197,21 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
             return_value=(
                 [],
                 ReviewStatus.NO_MATCH,
-                "????????????? Pixiv ???",
+                "视觉审核没有选出符合描述的 Pixiv 作品。",
             )
         )
 
         result = await service.search(
             SimpleNamespace(unified_msg_origin="test:group:pixiv-no-match"),
-            "??",
-            "????????",
+            "海狸",
+            "野生海狸真实照片",
             count=1,
             send_images=False,
         )
 
         self.assertFalse(result.success)
         self.assertEqual(result.ids, [])
-        self.assertIn("????", result.error)
+        self.assertIn("没有选出", result.error)
 
     async def test_strict_review_does_not_fill_unreviewed_pixiv_candidates(
         self,
@@ -250,7 +250,7 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
             selected, status, error = await service._review(
                 SimpleNamespace(unified_msg_origin="test"),
                 works,
-                "??????",
+                "海狸真实照片",
                 count=3,
             )
 
