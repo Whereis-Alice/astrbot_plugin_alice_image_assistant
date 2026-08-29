@@ -8,4 +8,5 @@ Pillow>=10.0.0
 pixivpy3>=3.0.0
 playwright>=1.40.0
 PyPDF2>=3.0.1
+requests>=2.31.0
 

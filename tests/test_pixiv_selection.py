@@ -6,6 +6,9 @@ from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from astrbot_plugin_alice_image_assistant.alice_image.forward.final_verify import (
+    FinalVerdict,
+)
 from astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search import (
     PixivForwardSearchService,
 )
@@ -257,6 +260,138 @@ class PixivForwardDedupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in selected], [2])
         self.assertEqual(status, ReviewStatus.MATCHED)
         self.assertEqual(error, "")
+
+
+class PixivFinalVerifyTests(unittest.IsolatedAsyncioTestCase):
+    """Pixiv 精确找图的终选全分辨率复核。
+
+    拼图每格只有 300x300，细节几乎全丢；这几条用例锁住"复核拒绝就不要发"、
+    "复核自身报错不许丢图"、"开关关掉就完全不调用模型"三条语义。
+    """
+
+    @staticmethod
+    def _service(**review_overrides) -> PixivForwardSearchService:
+        works = [SimpleNamespace(id=value) for value in (1, 2, 3)]
+        service = PixivForwardSearchService.__new__(PixivForwardSearchService)
+        service.review_config = {"strict_match_enabled": True, **review_overrides}
+        service.controller = SimpleNamespace(
+            _get_http_session=AsyncMock(return_value=object())
+        )
+        service._provider = AsyncMock(return_value=object())
+        service._preview_url = lambda item: f"https://example.com/{item.id}.jpg"
+        service._collage = SimpleNamespace(
+            create_collage_from_items=AsyncMock(
+                return_value=(
+                    b"collage",
+                    [
+                        (f"https://example.com/{item.id}.jpg", b"image-bytes")
+                        for item in works
+                    ],
+                )
+            )
+        )
+        service._review_lock = asyncio.Semaphore(1)
+        return service, works
+
+    async def _run_review(self, service, works, verify_mock, count: int = 1):
+        with (
+            patch(
+                "astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search.download_image",
+                AsyncMock(return_value=b"image-bytes"),
+            ),
+            patch(
+                "astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search.select_from_collage",
+                AsyncMock(return_value=[2]),
+            ),
+            patch(
+                "astrbot_plugin_alice_image_assistant.alice_image.forward.pixiv_search.verify_candidate",
+                verify_mock,
+            ),
+        ):
+            return await service._review(
+                SimpleNamespace(unified_msg_origin="test"),
+                works,
+                "银发红瞳少女，黑色哥特长裙",
+                count=count,
+            )
+
+    async def test_rejected_candidate_is_not_sent_in_strict_mode(self) -> None:
+        service, works = self._service(final_verify_retry_limit=0)
+        verify = AsyncMock(
+            return_value=FinalVerdict(match=False, confidence=0.1, reason="发色不符")
+        )
+
+        selected, status, error = await self._run_review(service, works, verify)
+
+        self.assertEqual(selected, [])
+        self.assertEqual(status, ReviewStatus.NO_MATCH)
+        self.assertIn("发色不符", error)
+
+    async def test_rejected_candidate_falls_back_when_strict_disabled(self) -> None:
+        service, works = self._service(
+            strict_match_enabled=False, final_verify_retry_limit=0
+        )
+        verify = AsyncMock(
+            return_value=FinalVerdict(match=False, confidence=0.1, reason="发色不符")
+        )
+
+        selected, status, _error = await self._run_review(service, works, verify)
+
+        self.assertEqual([item.id for item in selected], [1])
+        self.assertEqual(status, ReviewStatus.NO_MATCH)
+
+    async def test_low_confidence_is_rejected_even_when_match_is_true(self) -> None:
+        service, works = self._service(
+            confidence_threshold=0.8, final_verify_retry_limit=0
+        )
+        verify = AsyncMock(
+            return_value=FinalVerdict(match=True, confidence=0.5, reason="不太确定")
+        )
+
+        selected, status, _error = await self._run_review(service, works, verify)
+
+        self.assertEqual(selected, [])
+        self.assertEqual(status, ReviewStatus.NO_MATCH)
+
+    async def test_verify_error_keeps_collage_choice(self) -> None:
+        service, works = self._service()
+        verify = AsyncMock(return_value=FinalVerdict(error="provider 调用失败"))
+
+        selected, status, error = await self._run_review(service, works, verify)
+
+        self.assertEqual([item.id for item in selected], [2])
+        self.assertEqual(status, ReviewStatus.MATCHED)
+        self.assertEqual(error, "")
+
+    async def test_accepted_candidate_passes_through(self) -> None:
+        service, works = self._service()
+        verify = AsyncMock(
+            return_value=FinalVerdict(match=True, confidence=0.9, reason="逐条命中")
+        )
+
+        selected, status, _error = await self._run_review(service, works, verify)
+
+        self.assertEqual([item.id for item in selected], [2])
+        self.assertEqual(status, ReviewStatus.MATCHED)
+        self.assertEqual(verify.await_count, 1)
+
+    async def test_disabled_switch_skips_the_model_entirely(self) -> None:
+        service, works = self._service(final_verify_enabled=False)
+        verify = AsyncMock(return_value=FinalVerdict(match=False))
+
+        selected, status, _error = await self._run_review(service, works, verify)
+
+        self.assertEqual([item.id for item in selected], [2])
+        self.assertEqual(status, ReviewStatus.MATCHED)
+        verify.assert_not_awaited()
+
+    async def test_verify_uses_bounded_max_edge(self) -> None:
+        service, works = self._service(final_verify_max_edge=99999)
+        verify = AsyncMock(return_value=FinalVerdict(match=True, confidence=0.9))
+
+        await self._run_review(service, works, verify)
+
+        self.assertEqual(verify.await_args.kwargs["max_edge"], 2048)
 
 
 if __name__ == "__main__":

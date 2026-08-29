@@ -10,7 +10,7 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import ProviderRequest
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 
 from .alice_image.config import NestedConfigProxy, as_dict, section
 from .alice_image.forward.orchestrator import ForwardSearchOrchestrator
@@ -26,23 +26,24 @@ from .alice_image.tools import (
     AliceReverseImageTool,
     AliceSessionImagesTool,
 )
-from .webapi import AliceWebApi, AliceWebService
+from .webapi import PLUGIN_VERSION, AliceWebApi, AliceWebService
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.6.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 
 
-@register(
-    PLUGIN_ID,
-    "Whereis-Alice",
-    "让 Bot 自主精确找图、挑图和以图搜图，并保留完整指令入口。",
-    PLUGIN_VERSION,
-    PLUGIN_REPO,
-)
 class AliceImageAssistantPlugin(Star):
+    """让 Bot 自主精确找图、挑图和以图搜图，并保留完整指令入口。
+
+    元数据统一由 metadata.yaml 提供，插件类由 AstrBot 的 Star.__init_subclass__
+    自动注册，因此不再使用已废弃的 @register 装饰器。
+
+    常用入口：/找图、/以图搜图、/pixiv 搜索、/图片助手 面板。
+    完整指令与可视化配置见 Dashboard 中的「爱丽丝图片助手」页面。
+    """
+
     def __init__(self, context: Context, config: AstrBotConfig | None = None) -> None:
         super().__init__(context)
         self.raw_config = config or {}

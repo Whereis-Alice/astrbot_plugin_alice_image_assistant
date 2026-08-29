@@ -24,10 +24,16 @@ from ..pixiv.utils.tag import (
     process_and_send_illusts_sorted,
     validate_and_process_tags,
 )
+from .final_verify import FINAL_VERIFY_MAX_EDGE, verify_candidate
 from .review import ReviewStatus
 from .serpapi.vlm import select_from_collage
 from .session_review import SessionReviewResolver
 from .soutu.composer import ComposerManager
+
+#: 终选复核默认置信度阈值，与搜图神器一致，保证两条线口径统一。
+DEFAULT_CONFIDENCE_THRESHOLD = 0.6
+#: 终选复核被拒后最多重选几次，避免为一次找图无限调用视觉模型。
+DEFAULT_FINAL_VERIFY_RETRY_LIMIT = 2
 
 
 @dataclass(slots=True)
@@ -79,6 +85,22 @@ class PixivForwardSearchService:
         except (TypeError, ValueError):
             value = default
         return max(minimum, min(maximum, value))
+
+    def _confidence_threshold(self) -> float:
+        """终选置信度阈值，收敛到 0..1。"""
+        try:
+            value = float(
+                self.review_config.get(
+                    "confidence_threshold", DEFAULT_CONFIDENCE_THRESHOLD
+                )
+            )
+        except (TypeError, ValueError):
+            value = DEFAULT_CONFIDENCE_THRESHOLD
+        return max(0.0, min(1.0, value))
+
+    def _final_verify_enabled(self) -> bool:
+        """是否对拼图选中的候选再做一次接近原分辨率的单图复核。"""
+        return bool(self.review_config.get("final_verify_enabled", True))
 
     async def close(self) -> None:
         for task in list(self._background_send_tasks):
@@ -532,12 +554,104 @@ class PixivForwardSearchService:
                 return items[:count], ReviewStatus.NO_MATCH, ""
             return [], ReviewStatus.NO_MATCH, "视觉审核没有选出符合描述的 Pixiv 作品。"
 
+        if self._final_verify_enabled():
+            verified, verify_status, verify_error = await self._final_verify(
+                provider, selected, dict(collage_items), description, count
+            )
+            if verify_status is ReviewStatus.NO_MATCH:
+                if not self.review_config.get("strict_match_enabled", True):
+                    return items[:count], ReviewStatus.NO_MATCH, ""
+                return [], ReviewStatus.NO_MATCH, verify_error
+            selected = verified
+
         if not self.review_config.get("strict_match_enabled", True):
             selected_ids = {getattr(item, "id", None) for item in selected}
             selected.extend(
                 item for item in items if getattr(item, "id", None) not in selected_ids
             )
         return selected[:count], ReviewStatus.MATCHED, ""
+
+    async def _final_verify(
+        self,
+        provider: Any,
+        selected: list[Any],
+        bytes_by_url: dict[str, bytes],
+        description: str,
+        count: int,
+    ) -> tuple[list[Any], ReviewStatus, str]:
+        """对拼图选中的候选逐张做接近原分辨率的单图复核。
+
+        拼图阶段每格只有 300x300，服饰细节、发色、配饰基本糊掉；这里把候选按
+        image_urls.large 的原始字节再送一次视觉模型做结构化判定，把"看着像但细节
+        不符"的作品挡在发送之前。复核链路自身报错时保留候选，交给 fail_open 决定，
+        绝不因为技术故障丢掉可用图。
+        """
+        threshold = self._confidence_threshold()
+        max_edge = self._bounded_int(
+            "final_verify_max_edge", FINAL_VERIFY_MAX_EDGE, 640, 2048
+        )
+        retry_limit = self._bounded_int(
+            "final_verify_retry_limit", DEFAULT_FINAL_VERIFY_RETRY_LIMIT, 0, 5
+        )
+        accepted: list[Any] = []
+        rejections = 0
+        last_reason = ""
+
+        for item in selected:
+            if len(accepted) >= count:
+                break
+            image_bytes = bytes_by_url.get(self._preview_url(item))
+            if not image_bytes:
+                # 拿不到原始字节时不做无谓的猜测，保留拼图结论。
+                accepted.append(item)
+                continue
+
+            async with self._review_lock:
+                verdict = await verify_candidate(
+                    provider,
+                    image_bytes,
+                    description,
+                    max_edge=max_edge,
+                    retries=1,
+                    log_prefix="AliceImagePixiv",
+                )
+
+            if verdict.errored:
+                logger.warning(
+                    "[AliceImagePixiv] 终选复核失败，保留拼图候选交由 fail_open 决策：%s",
+                    verdict.error,
+                )
+                accepted.append(item)
+                continue
+
+            if verdict.accepted(threshold):
+                logger.info(
+                    "[AliceImagePixiv] 终选复核通过（confidence=%s）：%s",
+                    verdict.confidence,
+                    verdict.reason or "(无理由)",
+                )
+                accepted.append(item)
+                continue
+
+            rejections += 1
+            last_reason = verdict.reason or last_reason
+            logger.info(
+                "[AliceImagePixiv] 终选复核剔除候选（confidence=%s）：%s",
+                verdict.confidence,
+                verdict.reason or "(无理由)",
+            )
+            if rejections > retry_limit:
+                break
+
+        if accepted:
+            return accepted, ReviewStatus.MATCHED, ""
+        return (
+            [],
+            ReviewStatus.NO_MATCH,
+            f"终选复核认为候选与描述不符：{last_reason}"
+            if last_reason
+            else "终选复核认为候选与描述不符。",
+        )
 
     async def search(
         self,

@@ -1150,7 +1150,7 @@ class IllustHandler:
                         }
 
                         debug_response = await asyncio.to_thread(
-                            requests.get, url, params=params, headers=headers
+                            requests.get, url, params=params, headers=headers, timeout=15
                         )
                         logger.error(
                             f"Pixiv 插件：调试信息 - 原始响应状态码: {debug_response.status_code}"

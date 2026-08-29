@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "display_name": "Alice Image Assistant",
+    "desc": "Lets your bot find images precisely, pick them with vision review, and trace sources, while keeping the full short-command set. Ships a 6-theme Dashboard WebUI for configuration and live trials."
+  },
+  "pages": {
+    "alice": {
+      "title": "Alice Image Assistant",
+      "desc": "Visual workbench to configure image search and reverse lookup, run trials, and browse every command."
+    }
+  }
+}

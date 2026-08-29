@@ -1,7 +1,7 @@
 """WebUI 主题定义（前后端唯一数据源）。
 
 前端 `pages/alice/theme.css` 里的 CSS 变量按 `key` 命名为
-`[data-theme="wonderland"]` 之类的选择器；此处的列表决定主题切换器
+`[data-alice-theme="wonderland"]` 之类的选择器；此处的列表决定主题切换器
 里出现哪些选项、顺序以及强调色小圆点的颜色。新增主题时必须同时补
 CSS，否则前端会回退到默认主题。
 """
