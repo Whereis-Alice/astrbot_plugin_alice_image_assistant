@@ -109,6 +109,8 @@ html[data-alice-compact="1"] .shell {
 }
 
 .appbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -237,6 +239,7 @@ html[data-alice-compact="1"] .shell {
 
 /* ---- 04 tabbar 与状态栏 -------------------------------------------------- */
 .tabbar {
+  position: relative; z-index: 20;
   display: flex; align-items: stretch; gap: 2px;
   padding: 0 var(--pad-x);
   min-width: 0; overflow-x: auto;

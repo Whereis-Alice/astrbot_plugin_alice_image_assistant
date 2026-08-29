@@ -883,20 +883,12 @@ function runtimeCard() {
   if (state.healthBusy && !rt) body.push(skeletonLines(5));
   else if (!rt) body.push(emptyBox("info", "暂无运行时信息", state.healthError || "后端未返回 runtime 字段"));
   else {
-    const providers = Array.isArray(rt.providers) ? rt.providers : [];
-    const providerText = providers.length
-      ? providers.map((p) => plain(p && p.id, "?") + " / " + plain(p && p.model, "?")).join("，")
-      : "—";
     body.push(kvTable([
-      ["Web 后端", rt.web_backend],
-      ["Playwright", rt.playwright],
-      ["VLM 提供商", rt.vlm_provider],
-      ["已注册提供商", providerText, { dim: !providers.length }],
       ["图片上下文会话", fmtNum(rt.image_context_sessions)],
       ["缓存图片", fmtNum(rt.cached_images)],
     ]));
   }
-  return card({ eyebrow: "RUNTIME", icon: "spark", title: "运行时", desc: "进程内依赖与缓存状态", body });
+  return card({ eyebrow: "RUNTIME", icon: "spark", title: "运行时", desc: "图片上下文与缓存状态", body });
 }
 
 function limitsCard() {
