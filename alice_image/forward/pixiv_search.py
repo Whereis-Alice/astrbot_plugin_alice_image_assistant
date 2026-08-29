@@ -79,6 +79,13 @@ class PixivForwardSearchService:
         )
         self._background_send_tasks: set[asyncio.Task[None]] = set()
 
+    def configure_review(self, review_config: dict[str, Any] | None) -> None:
+        """由编排层注入 find_image.llm_review 配置，与 soutu / serpapi 行为一致。
+
+        并发信号量在构造期已定型，这里只刷新配置字典，避免把正在等待的协程换到新锁上。
+        """
+        self.review_config = review_config if isinstance(review_config, dict) else {}
+
     def _bounded_int(self, key: str, default: int, minimum: int, maximum: int) -> int:
         try:
             value = int(self.review_config.get(key, default))

@@ -393,6 +393,17 @@ class PixivFinalVerifyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(verify.await_args.kwargs["max_edge"], 2048)
 
+    def test_configure_review_refreshes_config_and_rejects_non_dict(self) -> None:
+        """编排层每次搜索都会重新下发配置，pixiv 线必须能热更新且容忍脏值。"""
+        service, _works = self._service()
+
+        service.configure_review({"confidence_threshold": 0.9})
+        self.assertEqual(service._confidence_threshold(), 0.9)
+
+        service.configure_review(None)
+        self.assertEqual(service.review_config, {})
+        self.assertTrue(service._final_verify_enabled())
+
 
 if __name__ == "__main__":
     unittest.main()

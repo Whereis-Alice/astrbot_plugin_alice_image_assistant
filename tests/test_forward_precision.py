@@ -1052,6 +1052,28 @@ class OrchestratorPrecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["query_rewrite"]["original"], "雪山")
         self.assertFalse(payload["query_rewrite"]["rewritten"])
 
+    async def test_review_config_reaches_every_byte_source(self) -> None:
+        """终选复核配置要同时下发到 pixiv / soutu / serpapi，避免 pixiv 线只读启动快照。"""
+        pixiv = _ByteStub()
+        soutu = _ByteStub()
+        serp = _ByteStub()
+        config = _forward_config(
+            llm_review={
+                "enabled": True,
+                "commands_enabled": True,
+                "confidence_threshold": 0.85,
+                "final_verify_enabled": False,
+            }
+        )
+        service = ForwardSearchOrchestrator(config, pixiv, soutu, serp)
+
+        await service.search(_Event(), "雪山", "雪山日出", "soutu", count=1)
+
+        for stub in (pixiv, soutu, serp):
+            self.assertIsInstance(stub.review_config, dict)
+            self.assertEqual(stub.review_config.get("confidence_threshold"), 0.85)
+            self.assertIs(stub.review_config.get("final_verify_enabled"), False)
+
 
 if __name__ == "__main__":
     unittest.main()

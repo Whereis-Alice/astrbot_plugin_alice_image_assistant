@@ -324,7 +324,7 @@ class ForwardSearchOrchestrator:
 
     def _configure_source_review(self, review_cfg: dict[str, Any]) -> None:
         """把审核相关配置（终选复核开关、置信度阈值、并发上限）下发给各字节来源。"""
-        for service in (self.soutu, self.serpapi):
+        for service in (self.soutu, self.serpapi, self.pixiv):
             configure = getattr(service, "configure_review", None)
             if configure is None:
                 continue
