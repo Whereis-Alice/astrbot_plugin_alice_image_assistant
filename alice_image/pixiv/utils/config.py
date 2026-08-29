@@ -1,10 +1,11 @@
+import asyncio
 import os
 import shutil
-import asyncio
-from astrbot.api import logger
-from pathlib import Path
-from typing import Dict, Any
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from astrbot.api import logger
 
 
 async def clean_temp_dir(temp_dir: Path, max_files: int = 20) -> None:
@@ -53,7 +54,7 @@ def _get_temp_entries(temp_dir: Path) -> list[str]:
 
 def _sort_files_by_ctime(files: list[str]) -> list[str]:
     """按创建时间排序文件列表"""
-    return sorted(files, key=lambda x: os.path.getctime(x))
+    return sorted(files, key=lambda x: Path(x).stat().st_ctime)
 
 
 async def smart_clean_temp_dir(
@@ -79,7 +80,7 @@ class PixivConfig:
 
     MAX_RETURN_COUNT = 10
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """初始化配置"""
         self.config = config
         self._load_config()
@@ -263,7 +264,7 @@ class PixivConfig:
             f"fanbox_data_source='{self.fanbox_data_source}'"
         )
 
-    def get_requests_kwargs(self) -> Dict[str, Any]:
+    def get_requests_kwargs(self) -> dict[str, Any]:
         """获取请求参数"""
         kwargs = {}
         if self.proxy:
@@ -352,7 +353,7 @@ class PixivConfigManager:
         except ImportError:
             return "# Pixiv 配置命令帮助\n\n配置帮助信息加载失败，请检查帮助文件。"
 
-    def get_current_config(self) -> Dict[str, Any]:
+    def get_current_config(self) -> dict[str, Any]:
         """获取当前配置（只显示常用配置项，隐藏敏感信息）"""
         # 只显示用户常用的配置项，隐藏敏感和不常用的配置
         display_keys = [
@@ -388,7 +389,7 @@ class PixivConfigManager:
 
         current = {}
         for k in display_keys:
-            if k in self.schema.keys():
+            if k in self.schema:
                 current[k] = getattr(self.config, k, None)
         return current
 
@@ -536,5 +537,4 @@ class PixivConfigManager:
             for k, v in current.items():
                 msg += f"{k}: {v}\n"
             return msg
-        else:
-            return message
+        return message

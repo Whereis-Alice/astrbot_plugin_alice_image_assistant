@@ -1,0 +1,314 @@
+/* ==========================================================================
+ * 爱丽丝的图片助手 · WebUI 主题令牌 (pages/alice/theme.css)
+ *
+ * 6 套主题全部通过 <html data-alice-theme="..."> 切换，
+ * style.css 只消费这里的 CSS 变量，不含任何硬编码颜色。
+ * 浅色主题（sakura / paper）真正反转文字、边框与阴影，而非只换 accent。
+ *
+ * 令牌清单：
+ *   底色     --canvas-from / --canvas-mid / --canvas-to / --canvas / --grain
+ *   卡片     --surface / --surface-2 / --surface-solid / --sheen / --inner-glow
+ *   描边     --border / --border-strong / --hairline
+ *   文字     --text / --muted / --faint
+ *   强调     --accent / --accent-2 / --accent-ink / --accent-soft
+ *   语义     --ok / --warn / --err / --info
+ *   零件     --chip / --chip-text / --code-bg / --code-text
+ *   控件     --field-bg / --field-border / --track
+ *   投影     --shadow / --shadow-lift / --accent-shadow
+ *   其它     --glass / --radius / --mode / color-scheme
+ * ========================================================================== */
+
+:root {
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Hiragino Sans GB", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Hiragino Sans GB", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", "Sarasa Mono SC", Consolas, "DejaVu Sans Mono", ui-monospace, monospace;
+  --radius: 20px;
+  --radius-sm: 13px;
+  --radius-xs: 9px;
+  --glass: 14px;
+}
+
+/* --------------------------------------------------------------------------
+ * 奇境 wonderland — 深紫天鹅绒底 · 香槟金描边，默认主题
+ * ------------------------------------------------------------------------ */
+:root,
+[data-alice-theme="wonderland"] {
+  --canvas-from: #130c1d;
+  --canvas-mid: #1b1229;
+  --canvas-to: #251835;
+  --canvas:
+    radial-gradient(1100px 560px at 10% -10%, rgba(212, 175, 55, 0.16), transparent 62%),
+    radial-gradient(980px 600px at 92% 2%, rgba(176, 107, 255, 0.22), transparent 60%),
+    radial-gradient(720px 520px at 48% 110%, rgba(120, 76, 190, 0.18), transparent 64%),
+    linear-gradient(168deg, #130c1d 0%, #1b1229 54%, #251835 100%);
+  --grain:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 26px);
+  --surface: rgba(34, 24, 49, 0.84);
+  --surface-2: rgba(20, 14, 30, 0.62);
+  --surface-solid: #211730;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 46%);
+  --inner-glow: rgba(255, 255, 255, 0.07);
+  --border: #3a2c4e;
+  --border-strong: #55416f;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --text: #f3ecfa;
+  --muted: #b6a7c9;
+  --faint: #877a9b;
+  --accent: #d4af37;
+  --accent-2: #b06bff;
+  --accent-ink: #1e1503;
+  --accent-soft: rgba(212, 175, 55, 0.16);
+  --ok: #5fd6a4;
+  --warn: #f0bb5c;
+  --err: #f2748a;
+  --info: #94a9dd;
+  --chip: rgba(212, 175, 55, 0.13);
+  --chip-text: #ecd58a;
+  --code-bg: rgba(11, 7, 18, 0.72);
+  --code-text: #e3c98d;
+  --field-bg: rgba(12, 8, 20, 0.55);
+  --field-border: #43335a;
+  --track: rgba(255, 255, 255, 0.1);
+  --shadow: 0 26px 58px -32px rgba(0, 0, 0, 0.72);
+  --shadow-lift: 0 30px 70px -30px rgba(0, 0, 0, 0.8);
+  --accent-shadow: 0 12px 30px -14px rgba(212, 175, 55, 0.5);
+  --mode: dark;
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+ * 极光 aurora — 深青绿玻璃 · 薄荷流光
+ * ------------------------------------------------------------------------ */
+[data-alice-theme="aurora"] {
+  --canvas-from: #04161a;
+  --canvas-mid: #072428;
+  --canvas-to: #0a3033;
+  --canvas:
+    radial-gradient(940px 520px at 6% -6%, rgba(61, 220, 151, 0.24), transparent 60%),
+    radial-gradient(900px 560px at 84% 4%, rgba(82, 209, 255, 0.22), transparent 58%),
+    radial-gradient(760px 560px at 52% 112%, rgba(126, 168, 255, 0.14), transparent 62%),
+    linear-gradient(170deg, #04161a 0%, #072428 52%, #0a3033 100%);
+  --grain:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.026) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 30px);
+  --surface: rgba(10, 36, 39, 0.82);
+  --surface-2: rgba(4, 22, 25, 0.6);
+  --surface-solid: #0b2b2e;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 48%);
+  --inner-glow: rgba(255, 255, 255, 0.08);
+  --border: #17393b;
+  --border-strong: #265654;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --text: #e7f7f2;
+  --muted: #95bab2;
+  --faint: #6d928b;
+  --accent: #3ddc97;
+  --accent-2: #52d1ff;
+  --accent-ink: #032018;
+  --accent-soft: rgba(61, 220, 151, 0.15);
+  --ok: #4fe0aa;
+  --warn: #ffc76b;
+  --err: #ff8090;
+  --info: #7fc4dd;
+  --chip: rgba(61, 220, 151, 0.14);
+  --chip-text: #9df0c9;
+  --code-bg: rgba(2, 18, 20, 0.72);
+  --code-text: #8fe6c4;
+  --field-bg: rgba(3, 20, 22, 0.55);
+  --field-border: #1d4547;
+  --track: rgba(255, 255, 255, 0.1);
+  --shadow: 0 26px 58px -32px rgba(0, 12, 14, 0.75);
+  --shadow-lift: 0 30px 70px -30px rgba(0, 12, 14, 0.82);
+  --accent-shadow: 0 12px 30px -14px rgba(61, 220, 151, 0.42);
+  --mode: dark;
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+ * 午夜 midnight — 深蓝夜幕 · 冷紫霓虹
+ * ------------------------------------------------------------------------ */
+[data-alice-theme="midnight"] {
+  --canvas-from: #080c1c;
+  --canvas-mid: #0d1330;
+  --canvas-to: #131c40;
+  --canvas:
+    radial-gradient(1080px 560px at 14% -8%, rgba(124, 140, 255, 0.22), transparent 62%),
+    radial-gradient(960px 580px at 88% 2%, rgba(77, 226, 255, 0.16), transparent 60%),
+    linear-gradient(168deg, #080c1c 0%, #0d1330 52%, #131c40 100%);
+  --grain:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 28px);
+  --surface: rgba(19, 26, 51, 0.84);
+  --surface-2: rgba(9, 13, 30, 0.62);
+  --surface-solid: #141c3b;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0) 46%);
+  --inner-glow: rgba(255, 255, 255, 0.075);
+  --border: #263054;
+  --border-strong: #3b4778;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --text: #eaeefc;
+  --muted: #9ca8ce;
+  --faint: #707b9d;
+  --accent: #7c8cff;
+  --accent-2: #4de2ff;
+  --accent-ink: #060a1e;
+  --accent-soft: rgba(124, 140, 255, 0.18);
+  --ok: #59dfab;
+  --warn: #ffc46b;
+  --err: #ff7d92;
+  --info: #86b6ff;
+  --chip: rgba(124, 140, 255, 0.16);
+  --chip-text: #b9c3ff;
+  --code-bg: rgba(6, 10, 24, 0.72);
+  --code-text: #a8c6ff;
+  --field-bg: rgba(7, 11, 26, 0.55);
+  --field-border: #2d3861;
+  --track: rgba(255, 255, 255, 0.1);
+  --shadow: 0 26px 58px -32px rgba(0, 0, 0, 0.7);
+  --shadow-lift: 0 30px 70px -30px rgba(0, 0, 0, 0.78);
+  --accent-shadow: 0 12px 30px -14px rgba(124, 140, 255, 0.45);
+  --mode: dark;
+  color-scheme: dark;
+}
+/* --------------------------------------------------------------------------
+ * 樱雪 sakura — 暖粉浅色 · 白瓷底与胭脂描边（真正的浅色主题）
+ * ------------------------------------------------------------------------ */
+[data-alice-theme="sakura"] {
+  --canvas-from: #fff8fa;
+  --canvas-mid: #ffeef3;
+  --canvas-to: #ffe3ec;
+  --canvas:
+    radial-gradient(980px 520px at 12% -12%, rgba(232, 116, 154, 0.16), transparent 60%),
+    radial-gradient(880px 520px at 88% 0%, rgba(176, 107, 255, 0.1), transparent 58%),
+    linear-gradient(172deg, #fff8fa 0%, #ffeef3 56%, #ffe3ec 100%);
+  --grain: repeating-linear-gradient(0deg, rgba(90, 40, 60, 0.016) 0 1px, transparent 1px 4px);
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-2: rgba(255, 244, 248, 0.86);
+  --surface-solid: #fffbfc;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 52%);
+  --inner-glow: rgba(255, 255, 255, 0.9);
+  --border: #f1d2dd;
+  --border-strong: #e0adbf;
+  --hairline: rgba(90, 40, 60, 0.07);
+  --text: #3b2731;
+  --muted: #7c6270;
+  --faint: #a68d99;
+  --accent: #e8749a;
+  --accent-2: #9c6bd8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(232, 116, 154, 0.14);
+  --ok: #0f8560;
+  --warn: #9c5a05;
+  --err: #cc2b48;
+  --info: #4a6fa5;
+  --chip: rgba(232, 116, 154, 0.13);
+  --chip-text: #a63c62;
+  --code-bg: #fdeef3;
+  --code-text: #7d3550;
+  --field-bg: #fffafc;
+  --field-border: #ecc7d5;
+  --track: rgba(59, 39, 49, 0.12);
+  --shadow: 0 20px 44px -30px rgba(120, 60, 82, 0.38);
+  --shadow-lift: 0 26px 56px -28px rgba(120, 60, 82, 0.42);
+  --accent-shadow: 0 12px 28px -14px rgba(232, 116, 154, 0.45);
+  --radius: 18px;
+  --glass: 10px;
+  --mode: light;
+  color-scheme: light;
+}
+
+/* --------------------------------------------------------------------------
+ * 纸稿 paper — 纸白中性底 · 靛蓝 accent，最高可读性
+ * ------------------------------------------------------------------------ */
+[data-alice-theme="paper"] {
+  --canvas-from: #f9fafc;
+  --canvas-mid: #f2f4f8;
+  --canvas-to: #e8ecf3;
+  --canvas:
+    radial-gradient(1000px 480px at 50% -14%, rgba(255, 255, 255, 0.95), transparent 62%),
+    linear-gradient(174deg, #f9fafc 0%, #f2f4f8 58%, #e8ecf3 100%);
+  --grain: none;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-2: #f4f6fa;
+  --surface-solid: #ffffff;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 50%);
+  --inner-glow: rgba(255, 255, 255, 1);
+  --border: #dde3ec;
+  --border-strong: #bfc9d8;
+  --hairline: rgba(22, 32, 46, 0.07);
+  --text: #16202e;
+  --muted: #566374;
+  --faint: #8892a2;
+  --accent: #4a6fa5;
+  --accent-2: #7c5cd6;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(74, 111, 165, 0.12);
+  --ok: #0d7a55;
+  --warn: #8f5300;
+  --err: #c22138;
+  --info: #35618f;
+  --chip: rgba(74, 111, 165, 0.11);
+  --chip-text: #2f5480;
+  --code-bg: #eef1f6;
+  --code-text: #33415a;
+  --field-bg: #ffffff;
+  --field-border: #ccd5e2;
+  --track: rgba(22, 32, 46, 0.12);
+  --shadow: 0 18px 40px -30px rgba(22, 32, 46, 0.35);
+  --shadow-lift: 0 24px 52px -28px rgba(22, 32, 46, 0.4);
+  --accent-shadow: 0 12px 26px -14px rgba(74, 111, 165, 0.4);
+  --radius: 12px;
+  --radius-sm: 9px;
+  --radius-xs: 7px;
+  --glass: 6px;
+  --mode: light;
+  color-scheme: light;
+}
+
+/* --------------------------------------------------------------------------
+ * 落日 sunset — 深棕暖底 · 橙红与琥珀渐层
+ * ------------------------------------------------------------------------ */
+[data-alice-theme="sunset"] {
+  --canvas-from: #1b100c;
+  --canvas-mid: #271510;
+  --canvas-to: #341b13;
+  --canvas:
+    radial-gradient(1000px 540px at 88% -10%, rgba(255, 138, 76, 0.28), transparent 62%),
+    radial-gradient(900px 500px at 6% 8%, rgba(255, 196, 107, 0.16), transparent 58%),
+    linear-gradient(166deg, #1b100c 0%, #271510 52%, #341b13 100%);
+  --grain:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 24px);
+  --surface: rgba(44, 25, 18, 0.86);
+  --surface-2: rgba(26, 14, 10, 0.62);
+  --surface-solid: #2b1811;
+  --sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 46%);
+  --inner-glow: rgba(255, 255, 255, 0.07);
+  --border: #4a2a1e;
+  --border-strong: #6b3d2b;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --text: #fdece2;
+  --muted: #c9a28d;
+  --faint: #9a7663;
+  --accent: #ff8a4c;
+  --accent-2: #ffc46b;
+  --accent-ink: #2a1006;
+  --accent-soft: rgba(255, 138, 76, 0.16);
+  --ok: #63d79f;
+  --warn: #ffc46b;
+  --err: #ff7f7f;
+  --info: #d3a98f;
+  --chip: rgba(255, 138, 76, 0.15);
+  --chip-text: #ffc3a2;
+  --code-bg: rgba(18, 9, 6, 0.72);
+  --code-text: #ffb890;
+  --field-bg: rgba(20, 10, 7, 0.55);
+  --field-border: #59331f;
+  --track: rgba(255, 255, 255, 0.1);
+  --shadow: 0 26px 58px -32px rgba(20, 6, 2, 0.78);
+  --shadow-lift: 0 30px 70px -30px rgba(20, 6, 2, 0.84);
+  --accent-shadow: 0 12px 30px -14px rgba(255, 138, 76, 0.45);
+  --mode: dark;
+  color-scheme: dark;
+}

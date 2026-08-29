@@ -241,9 +241,9 @@
               "filter_r18g_only": {"type": "bool", "description": "额外过滤 R18G", "default": false},
               "ai_filter_mode": {"type": "string", "description": "AI 作品过滤", "options": ["显示 AI 作品", "过滤 AI 作品", "仅 AI 作品"], "default": "显示 AI 作品"},
               "ai_detection_mode": {"type": "string", "description": "AI 判定方式", "options": ["field_or_tag", "field_only", "tag_only"], "default": "field_or_tag"},
-              "min_bookmarks": {"type": "int", "description": "最小收藏数，0 关闭", "default": 0},
+              "min_bookmarks": {"type": "int", "description": "最小收藏数，0 关闭", "hint": "配合「搜索默认按热度排序」才是真正的质量闸门；想明显提升观感建议设到 300 左右。", "default": 0},
               "min_views": {"type": "int", "description": "最小浏览数，0 关闭", "default": 0},
-              "min_likes": {"type": "int", "description": "最小点赞数，0 关闭", "default": 0},
+              "min_likes": {"type": "int", "description": "最小点赞数，0 关闭", "hint": "Pixiv app-api 不返回点赞字段，该项通常无效（插件会告警一次），请改用最小收藏数。", "default": 0},
               "deep_search_depth": {"type": "int", "description": "深度搜索页数；-1 不限", "default": 3},
               "show_details": {"type": "bool", "description": "附带作品详情", "default": true},
               "forward_threshold": {"type": "bool", "description": "使用合并转发发送", "default": false},
@@ -265,7 +265,14 @@
               "api_proxy_host": {"type": "string", "description": "Pixiv API 反代主机", "default": ""},
               "random_search_min_interval": {"type": "int", "description": "随机搜索最短间隔分钟", "default": 60},
               "random_search_max_interval": {"type": "int", "description": "随机搜索最长间隔分钟", "default": 120},
-              "random_sent_illust_retention_days": {"type": "int", "description": "随机搜索去重保留天数", "default": 7}
+              "random_sent_illust_retention_days": {"type": "int", "description": "随机搜索去重保留天数", "default": 7},
+              "search_autocomplete_enabled": {"type": "bool", "description": "启用关键词标签归一化", "hint": "用 Pixiv search_autocomplete 把中文 / 英文关键词换成官方日文 tag；关闭后中文命中率明显下降。网络失败会自动退回旧行为。", "default": true},
+              "search_autocomplete_limit": {"type": "int", "description": "最多采纳几个归一化候选 tag", "hint": "调太大容易引入无关 tag，反而拉低精准度。", "default": 3, "slider": {"min": 1, "max": 8, "step": 1}},
+              "search_exact_first_enabled": {"type": "bool", "description": "优先精确匹配标签", "hint": "先用 exact_match_for_tags 精准命中，候选不足时才自动降级到部分匹配。", "default": true},
+              "search_title_caption_fallback": {"type": "bool", "description": "兜底搜索标题与简介", "hint": "前几级都搜不到时改搜 title_and_caption；结果更杂，但能救冷门关键词。", "default": true},
+              "search_prefer_popular": {"type": "bool", "description": "搜索默认按热度排序", "hint": "使用 sort=popular_desc。非 Premium 账号会被 Pixiv 静默降级，插件已自动检测并本地按收藏数重排。", "default": true},
+              "search_plan_max_steps": {"type": "int", "description": "一次搜索最多执行几级计划", "hint": "越大越慢；被截断时始终保留兼容旧行为的部分匹配那一级。", "default": 4, "slider": {"min": 1, "max": 6, "step": 1}},
+              "search_plan_min_results": {"type": "int", "description": "提前终止所需的候选数", "hint": "候选数达到该值就不再执行后续级别。调大更精准但更耗时。", "default": 10, "slider": {"min": 1, "max": 60, "step": 1}}
             }
           }
         }
@@ -342,7 +349,8 @@
           "proxy_url": {"type": "string", "description": "HTTP/HTTPS 代理 URL", "default": ""},
           "user_agent": {"type": "string", "description": "请求 User-Agent", "default": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
           "allow_image_upload": {"type": "bool", "description": "允许上传本地图片到 Catbox", "hint": "开启意味着图片会交给第三方图床。", "default": true},
-          "allow_local_file_access": {"type": "bool", "description": "允许工具读取本地图片路径", "hint": "默认关闭，避免模型读取并上传服务器任意文件。", "default": false}
+          "allow_local_file_access": {"type": "bool", "description": "允许工具读取本地图片路径", "hint": "默认关闭，避免模型读取并上传服务器任意文件。", "default": false},
+          "total_timeout_seconds": {"type": "int", "description": "单个搜图引擎的总超时（秒）", "hint": "范围 10–300。超时的引擎会被单独放弃，其余引擎的结果照常融合。", "default": 45, "slider": {"min": 10, "max": 300, "step": 5}}
         }
       },
       "api_keys": {
@@ -360,19 +368,32 @@
         "description": "反搜引擎开关",
         "items": {
           "enable_saucenao": {"type": "bool", "description": "启用 SauceNAO", "default": true},
-          "saucenao_similarity_threshold": {"type": "int", "description": "SauceNAO 最低相似度", "default": 40, "slider": {"min": 0, "max": 100, "step": 5}},
+          "saucenao_similarity_threshold": {"type": "int", "description": "SauceNAO 最低相似度", "hint": "低于该相似度的结果直接丢弃；60 是精准与召回的平衡点，调太低会引入大量误配。", "default": 60, "slider": {"min": 0, "max": 100, "step": 5}},
+          "saucenao_numres": {"type": "int", "description": "SauceNAO 单次请求返回条数", "hint": "范围 1–30。抓多一点更容易凑够高相似度结果，但会更快消耗每日额度。", "default": 5, "slider": {"min": 1, "max": 30, "step": 1}},
           "enable_google_lens": {"type": "bool", "description": "启用 Google Lens", "default": true},
-          "enable_ascii2d": {"type": "bool", "description": "启用 Ascii2d", "default": true}
+          "google_lens_max_results": {"type": "int", "description": "Google Lens 取用的视觉匹配条数", "hint": "范围 1–30。Google Lens 不给相似度，插件按返回位次折算分数。", "default": 8, "slider": {"min": 1, "max": 30, "step": 1}},
+          "enable_ascii2d": {"type": "bool", "description": "启用 Ascii2d", "default": true},
+          "ascii2d_max_results": {"type": "int", "description": "Ascii2d 单次返回条数", "hint": "范围 1–20。bovw（特征）与 color（颜色）两种模式的结果会先按链接去重再截断。", "default": 5, "slider": {"min": 1, "max": 20, "step": 1}}
         }
       },
       "display": {
         "type": "object",
         "description": "反搜结果输出",
         "items": {
-          "max_results": {"type": "int", "description": "每个引擎最大结果数", "default": 5, "slider": {"min": 1, "max": 10, "step": 1}},
+          "max_results": {"type": "int", "description": "最终展示结果条数上限", "hint": "跨引擎融合、按链接去重、按分数排序之后再截断；每个引擎内部抓取多少由引擎参数控制。", "default": 5, "slider": {"min": 1, "max": 10, "step": 1}},
           "forward_message_enabled": {"type": "bool", "description": "QQ 优先使用合并转发", "default": true}
         }
       }
+    }
+  },
+  "webui": {
+    "type": "object",
+    "description": "Dashboard WebUI",
+    "hint": "在 AstrBot 面板里快速配置、试跑找图与溯源。鉴权完全依赖面板登录态，请勿把面板直接暴露到公网。",
+    "items": {
+      "enabled": {"type": "bool", "description": "启用 WebUI 与其后端接口", "hint": "关闭后插件不再注册任何 HTTP 路由，指令与 LLM 工具不受影响。改动需要重载插件。", "default": true},
+      "preview_ttl_seconds": {"type": "int", "description": "预览图缓存保留秒数", "hint": "WebUI 里找到的原图只存在插件进程内存中，超时自动丢弃。范围 60–7200。", "default": 900, "slider": {"min": 60, "max": 7200, "step": 60}},
+      "preview_cache_max_items": {"type": "int", "description": "预览图缓存最多保留张数", "hint": "范围 4–128。同时还有 48MB 总字节上限兜底，先淘汰最久未用的。", "default": 24, "slider": {"min": 4, "max": 128, "step": 4}}
     }
   }
 }

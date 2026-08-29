@@ -22,6 +22,17 @@ from astrbot.api.star import Context
 from astrbot.core.message.components import Image, Node, Nodes, Plain, Reply
 
 from .ascii2d_strategy import Ascii2dStrategy
+from .constant import (
+    DEFAULT_ASCII2D_MAX_RESULTS,
+    DEFAULT_GOOGLE_LENS_MAX_RESULTS,
+    DEFAULT_MAX_RESULTS,
+    DEFAULT_SAUCENAO_NUMRES,
+    DEFAULT_SAUCENAO_SIMILARITY_THRESHOLD,
+    DEFAULT_TOTAL_TIMEOUT_SECONDS,
+    MAX_TOTAL_TIMEOUT_SECONDS,
+    MIN_TOTAL_TIMEOUT_SECONDS,
+    REVERSE_SEARCH_COMMAND_NAMES,
+)
 from .google_lens_strategy import GoogleLensStrategy
 from .image_context import (
     get_image_context_manager,
@@ -33,9 +44,11 @@ from .service import AliceImageReverseService
 from .strategy import ImageSearchStrategy
 from .utils import (
     close_aiohttp_session,
+    coerce_int,
     get_bot_api,
     get_http_image_url,
     is_aiocqhttp_platform,
+    retain_aiohttp_session,
     set_allow_image_upload,
     set_allow_local_file_access,
     set_proxy_url,
@@ -99,14 +112,36 @@ class AliceReverseController:
         self._image_wait_lock = asyncio.Lock()
         self._image_wait_clock = time.monotonic
 
+        # 登记全局 aiohttp 会话持有者：热重载时新旧实例会短暂共存，
+        # 用引用计数避免旧实例的 terminate() 把新实例的会话一起关掉。
+        retain_aiohttp_session()
+
         # 初始化搜图策略
         self.strategies: list[ImageSearchStrategy] = []
         self._init_strategies()
 
         # 初始化搜索服务
-        max_results = self._get_nested_config("display", "max_results", default=5)
+        # display.max_results 是"最终展示条数上限"，每引擎抓取上限由 service 内部决定
+        max_results = coerce_int(
+            self._get_nested_config("display", "max_results", default=DEFAULT_MAX_RESULTS),
+            DEFAULT_MAX_RESULTS,
+            1,
+            10,
+        )
+        total_timeout_seconds = coerce_int(
+            self._get_nested_config(
+                "network",
+                "total_timeout_seconds",
+                default=DEFAULT_TOTAL_TIMEOUT_SECONDS,
+            ),
+            DEFAULT_TOTAL_TIMEOUT_SECONDS,
+            MIN_TOTAL_TIMEOUT_SECONDS,
+            MAX_TOTAL_TIMEOUT_SECONDS,
+        )
         self.service = AliceImageReverseService(
-            self.strategies, max_results=max_results
+            self.strategies,
+            max_results=max_results,
+            total_timeout_seconds=total_timeout_seconds,
         )
 
     @staticmethod
@@ -148,6 +183,28 @@ class AliceReverseController:
                 return default
         return value
 
+    def _get_config_section(self, *keys: str) -> dict[str, Any]:
+        """获取配置中的一个"节"，保证返回字典.
+
+        配置文件被手改成字符串/列表时，直接对 _get_nested_config() 的返回值调
+        .get() 会抛 AttributeError 并让整个 __init__ 崩溃，因此这里统一校验类型。
+
+        Args:
+            *keys: 嵌套的配置键路径
+
+        Returns:
+            配置节字典；缺失或类型不对时返回空字典
+        """
+        value = self._get_nested_config(*keys, default=None)
+        if isinstance(value, dict):
+            return value
+        if value is not None:
+            logger.warning(
+                f"[AliceImageReverse] 配置节 {'.'.join(keys)} 不是字典 "
+                f"({type(value).__name__})，已按空配置处理"
+            )
+        return {}
+
     @staticmethod
     def _normalize_image_wait_timeout(value: Any) -> int:
         """将图片等待超时配置限制在支持范围内"""
@@ -165,7 +222,7 @@ class AliceReverseController:
     def _init_strategies(self) -> None:
         """初始化搜图策略."""
         # 设置网络配置
-        network_config = self._get_nested_config("network", default={})
+        network_config = self._get_config_section("network")
         proxy_url = network_config.get("proxy_url", "")
         set_proxy_url(proxy_url)
         user_agent = network_config.get("user_agent", "")
@@ -176,7 +233,7 @@ class AliceReverseController:
         set_allow_local_file_access(allow_local_file_access)
 
         # 初始化图片上下文管理器
-        ai_behavior = self._get_nested_config("ai_behavior", default={})
+        ai_behavior = self._get_config_section("ai_behavior")
         isolation_mode = ai_behavior.get("image_context_isolation", "session")
         max_images = ai_behavior.get("max_images_per_session", 20)
         image_ttl_seconds = ai_behavior.get("image_context_ttl_seconds", 0)
@@ -191,17 +248,35 @@ class AliceReverseController:
         )
 
         # 获取策略启用配置
-        strategies_config = self._get_nested_config("strategies", default={})
-        api_keys_config = self._get_nested_config("api_keys", default={})
+        strategies_config = self._get_config_section("strategies")
+        api_keys_config = self._get_config_section("api_keys")
 
         # SauceNAO
         enable_saucenao = strategies_config.get("enable_saucenao", True)
-        saucenao_threshold = strategies_config.get("saucenao_similarity_threshold", 40)
+        # WebUI 可能把数值存成字符串，全部经 coerce_int 强制转换后再夹取范围，
+        # 否则 max(0, min(100, "40")) 会抛 TypeError 让插件初始化直接失败。
+        saucenao_threshold = coerce_int(
+            strategies_config.get(
+                "saucenao_similarity_threshold",
+                DEFAULT_SAUCENAO_SIMILARITY_THRESHOLD,
+            ),
+            DEFAULT_SAUCENAO_SIMILARITY_THRESHOLD,
+            0,
+            100,
+        )
+        saucenao_numres = coerce_int(
+            strategies_config.get("saucenao_numres", DEFAULT_SAUCENAO_NUMRES),
+            DEFAULT_SAUCENAO_NUMRES,
+            1,
+            30,
+        )
         sauce_nao_key = api_keys_config.get("saucenao_api_key", "")
         if enable_saucenao and sauce_nao_key:
             self.strategies.append(
                 SauceNaoStrategy(
-                    api_key=sauce_nao_key, similarity_threshold=saucenao_threshold
+                    api_key=sauce_nao_key,
+                    similarity_threshold=saucenao_threshold,
+                    max_results=saucenao_numres,
                 )
             )
             logger.info(
@@ -215,8 +290,20 @@ class AliceReverseController:
         # Google Lens (SerpAPI)
         enable_google_lens = strategies_config.get("enable_google_lens", True)
         serpapi_keys = api_keys_config.get("serpapi_keys", [])
+        google_lens_max_results = coerce_int(
+            strategies_config.get(
+                "google_lens_max_results", DEFAULT_GOOGLE_LENS_MAX_RESULTS
+            ),
+            DEFAULT_GOOGLE_LENS_MAX_RESULTS,
+            1,
+            30,
+        )
         if enable_google_lens and serpapi_keys and isinstance(serpapi_keys, list):
-            self.strategies.append(GoogleLensStrategy(api_keys=serpapi_keys))
+            self.strategies.append(
+                GoogleLensStrategy(
+                    api_keys=serpapi_keys, max_results=google_lens_max_results
+                )
+            )
             logger.info("[AliceImageReverse] 已加载 Google Lens 策略")
         elif enable_google_lens:
             logger.warning(
@@ -229,10 +316,18 @@ class AliceReverseController:
         enable_ascii2d = strategies_config.get("enable_ascii2d", True)
         ascii2d_session_id = api_keys_config.get("ascii2d_session_id", "")
         ascii2d_cf_clearance = api_keys_config.get("ascii2d_cf_clearance", "")
+        ascii2d_max_results = coerce_int(
+            strategies_config.get("ascii2d_max_results", DEFAULT_ASCII2D_MAX_RESULTS),
+            DEFAULT_ASCII2D_MAX_RESULTS,
+            1,
+            20,
+        )
         if enable_ascii2d and ascii2d_session_id:
             self.strategies.append(
                 Ascii2dStrategy(
-                    session_id=ascii2d_session_id, cf_clearance=ascii2d_cf_clearance
+                    session_id=ascii2d_session_id,
+                    cf_clearance=ascii2d_cf_clearance,
+                    max_results=ascii2d_max_results,
                 )
             )
             logger.info("[AliceImageReverse] 已加载 Ascii2d 策略")
@@ -265,7 +360,7 @@ class AliceReverseController:
         Returns:
             True 如果静默模式开启
         """
-        ai_behavior = self._get_nested_config("ai_behavior", default={})
+        ai_behavior = self._get_config_section("ai_behavior")
         return ai_behavior.get("llm_tool_silent_mode", False)
 
     @staticmethod
@@ -278,11 +373,16 @@ class AliceReverseController:
 
     @staticmethod
     def _is_search_command_event(event: AstrMessageEvent) -> bool:
-        """判断事件是否会作为搜图命令处理"""
+        """判断事件是否会作为搜图命令处理.
+
+        命令名与别名从 constant.REVERSE_SEARCH_COMMAND_NAMES 统一读取：
+        硬编码命令名一旦与实际注册的命令/别名不同步，命令自带的图片就会被
+        误当成"等待中的图片"消费掉。
+        """
         if not event.is_at_or_wake_command:
             return False
         parts = event.message_str.strip().split(maxsplit=1)
-        return bool(parts) and parts[0] == "aa溯"
+        return bool(parts) and parts[0] in REVERSE_SEARCH_COMMAND_NAMES
 
     def _cleanup_expired_image_waits_locked(self, now: float) -> None:
         """清理过期等待；调用方必须持有等待锁"""
@@ -415,7 +515,7 @@ class AliceReverseController:
 
     async def on_message(self, event: AstrMessageEvent):
         """监听所有消息，捕获图片并消费命令等待"""
-        ai_behavior = self._get_nested_config("ai_behavior", default={})
+        ai_behavior = self._get_config_section("ai_behavior")
         capture_context = ai_behavior.get("capture_image_context", True)
         messages = event.get_messages()
         image_ctx = get_image_context_manager()
@@ -488,11 +588,23 @@ class AliceReverseController:
         image_url = None
         selected_by = "image_index"
 
-        # 优先使用稳定 image_id，兼容旧调用时回退到 image_index。
+        # 优先使用稳定 image_id；显式传入的 image_id 查不到时**不能**静默回退到
+        # 最新图片——那会让 LLM 搜了另一张图却以为搜的是指定的那张。
         if image_id and image_id.strip():
-            image_url = image_ctx.get_image_by_id(event, image_id.strip())
+            requested_id = image_id.strip()
+            image_url = image_ctx.get_image_by_id(event, requested_id)
+            if not image_url:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"未找到 image_id 为 {requested_id} 的图片",
+                        "image_context": image_ctx.get_image_context_info(event),
+                        "hint": "image_id 可能已过期或不属于当前会话，请调用 get_session_images 重新获取后再指定",
+                    },
+                    ensure_ascii=False,
+                )
             selected_by = "image_id"
-        if not image_url:
+        else:
             image_url = image_ctx.get_image_by_index(event, image_index)
             selected_by = "image_index"
 
@@ -573,6 +685,9 @@ class AliceReverseController:
                     "source": item.source,
                     "similarity": item.similarity,
                     "domain": item.domain,
+                    # 把归一化置信度与命中引擎一并给 LLM：多引擎共识是最强的可信信号
+                    "score": item.score,
+                    "matched_by": item.matched_by,
                 }
             )
 
@@ -854,7 +969,7 @@ class AliceReverseController:
             event: 消息事件
             items: 搜索结果列表
         """
-        display = self._get_nested_config("display", default={})
+        display = self._get_config_section("display")
         if display.get("forward_message_enabled", True) and is_aiocqhttp_platform(
             event
         ):

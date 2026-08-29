@@ -1,9 +1,10 @@
-from astrbot.api.event import AstrMessageEvent
 from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+
 from ..utils.database import (
     add_subscription,
-    remove_subscription,
     list_subscriptions,
+    remove_subscription,
 )
 
 
@@ -69,7 +70,7 @@ class SubscribeHandler:
                 f"无法获取画师ID {artist_id} 的信息，但仍会使用该ID进行订阅。"
             )
 
-        success, message = add_subscription(
+        _success, message = add_subscription(
             event.get_group_id() or event.get_sender_id(),
             session_id,
             sub_type,
@@ -94,7 +95,7 @@ class SubscribeHandler:
         chat_id = event.get_group_id() or event.get_sender_id()
         sub_type = "artist"
 
-        success, message = remove_subscription(chat_id, sub_type, artist_id)
+        _success, message = remove_subscription(chat_id, sub_type, artist_id)
         yield event.plain_result(message)
 
     async def pixiv_subscribe_list(self, event: AstrMessageEvent, args: str = ""):

@@ -1,5 +1,6 @@
-from astrbot.api.event import AstrMessageEvent
 from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+
 from ..utils.help import get_help_message
 
 
@@ -55,7 +56,7 @@ class MiscHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取趋势标签时发生错误 - {e}")
-            yield event.plain_result(f"获取趋势标签时发生错误: {str(e)}")
+            yield event.plain_result(f"获取趋势标签时发生错误: {e!s}")
 
     async def pixiv_ai_show_settings(self, event: AstrMessageEvent, setting: str = ""):
         """设置是否展示AI生成作品"""
@@ -119,4 +120,4 @@ class MiscHandler:
             import traceback
 
             logger.error(traceback.format_exc())
-            yield event.plain_result(f"设置AI作品显示时发生错误: {str(e)}")
+            yield event.plain_result(f"设置AI作品显示时发生错误: {e!s}")

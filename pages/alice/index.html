@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-alice-theme="wonderland">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>爱丽丝的图片助手 · 控制台</title>
+<link rel="stylesheet" href="./theme.css" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+<!-- 图标 sprite：全部内联，页面零外部依赖 -->
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M3.6 18a9 9 0 1 1 16.8 0"/><path d="M12 13.6 16.2 9"/><circle cx="12" cy="14.6" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/><path d="m15.4 15.4 4.6 4.6"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="m9 15 1.8-4.2L15 9l-1.8 4.2z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17.5 7H20M4 12h3M11.5 12H20M4 17h9M17.5 17H20"/><circle cx="15.2" cy="7" r="2"/><circle cx="9.2" cy="12" r="2"/><circle cx="15.2" cy="17" r="2"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="2.6" y="4.4" width="18.8" height="15.2" rx="2.6"/><path d="m6.8 10 2.4 2-2.4 2M12.2 14h4.6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 11.2v5.6M12 7.6v.7"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.6h-4.6"/></symbol>
+  <symbol id="i-compact" viewBox="0 0 24 24"><path d="M4 12h16M8 7.6l4-3.6 4 3.6M8 16.4l4 3.6 4-3.6"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4.6H4.6V9M15 19.4h4.4V15M4.6 15v4.4H9M19.4 9V4.6H15"/></symbol>
+  <symbol id="i-caret" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="M9.6 6.4 15 12l-5.4 5.6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.6 12.6 5 5 9.8-11"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11.4" height="11.4" rx="2.6"/><path d="M15 6.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v6.5A2.5 2.5 0 0 0 6 15h.6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0-4.4-4.4M12 16l4.4-4.4"/><path d="M4 18.6h16"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16.4V4m0 0L7.6 8.4M12 4l4.4 4.4"/><path d="M4 15v3.6A1.4 1.4 0 0 0 5.4 20h13.2a1.4 1.4 0 0 0 1.4-1.4V15"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.6 12S6 5.8 12 5.8 21.4 12 21.4 12 18 18.2 12 18.2 2.6 12 2.6 12Z"/><circle cx="12" cy="12" r="2.9"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M9.6 6.4A9.8 9.8 0 0 1 12 6c6 0 9.4 6 9.4 6a17 17 0 0 1-2.9 3.6M6.3 8.5A16.6 16.6 0 0 0 2.6 12S6 18 12 18a9.7 9.7 0 0 0 3-.45"/><path d="M9.8 9.9a3 3 0 0 0 4.3 4.2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.6h5V7M6.6 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h6.1a1.5 1.5 0 0 0 1.5-1.4l.9-12"/><path d="M10.5 11v6M13.5 11v6"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.6 6.3"/><path d="M14 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.2-1.2"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.6h5.4V10M19.4 4.6 12 12"/><path d="M18.4 14v4.4a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 18.4V7.2a1.6 1.6 0 0 1 1.6-1.6H10"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5.6 4h9.2L20 9.2v10.2a.6.6 0 0 1-.6.6H5.6a1.6 1.6 0 0 1-1.6-1.6V5.6A1.6 1.6 0 0 1 5.6 4Z"/><path d="M8 4v5h6.6V4.6M8 13.6h8v6.4H8z"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v4.6h4.6"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3.6a8.4 8.4 0 1 0 0 16.8c1.4 0 2-.9 2-1.8 0-1.6-1.7-1.7-1.7-3.2 0-1.1.9-1.8 2.2-1.8h1.6a4.4 4.4 0 0 0 4.3-4.4C20.4 6 16.7 3.6 12 3.6Z"/><circle cx="8.4" cy="10.4" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.9" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.7" cy="9.7" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.6 3.9 2.8 17.4A1.6 1.6 0 0 0 4.2 19.8h15.6a1.6 1.6 0 0 0 1.4-2.4L13.4 3.9a1.6 1.6 0 0 0-2.8 0Z"/><path d="M12 9v4.4M12 16.3v.7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.4 4.8 6v5.5c0 4.3 3 7.5 7.2 9.1 4.2-1.6 7.2-4.8 7.2-9.1V6Z"/><path d="m9 12 2.3 2.3L15.4 10"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3.6 5.4h16.8L14 12.6v6l-4-2v-4z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.2" y="4.6" width="17.6" height="14.8" rx="2.8"/><path d="m3.5 15.6 4.3-3.7 3.4 2.9 3.2-2.7 6.4 5.1"/><circle cx="15.7" cy="9.1" r="1.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.4V12l3.4 2.2"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.4 13.9 9l5.6 1.9-5.6 2L12 18.6l-1.9-5.7-5.6-2L10.1 9z"/><path d="M18.6 3.6v2.6M17.3 4.9h2.6"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 8.4 4.5L12 12 3.6 7.5z"/><path d="m4.7 12.4-1.1.6L12 17.5l8.4-4.5-1.1-.6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.2"/><path d="m11 11 8 8M15.4 15.4l2.2-2.2M17.8 17.8l2.2-2.2"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5S14.4 18.2 12 20.5c-2.4-2.3-3.6-5.2-3.6-8.5S9.6 5.8 12 3.5Z"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M12.5 3.6H20V11l-8.8 8.8a1.6 1.6 0 0 1-2.3 0L3.7 14.1a1.6 1.6 0 0 1 0-2.3z"/><circle cx="16.4" cy="7.6" r="1.4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.6 6.6A1.6 1.6 0 0 1 5.2 5h4l2 2.6h7.6A1.6 1.6 0 0 1 20.4 9.2v8.2a1.6 1.6 0 0 1-1.6 1.6H5.2a1.6 1.6 0 0 1-1.6-1.6z"/></symbol>
+  <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/><path d="m15.4 15.4 4.6 4.6M8.2 10.6h4.8M10.6 8.2v4.8"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.6 18 12 8 18.4Z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.6"/><path d="M5.2 19.4a6.8 6.8 0 0 1 13.6 0"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.4C10.2 5 7.8 4.6 4.6 4.9v12.4c3.2-.3 5.6.1 7.4 1.5 1.8-1.4 4.2-1.8 7.4-1.5V4.9c-3.2-.3-5.6.1-7.4 1.5Z"/><path d="M12 6.4v12.4"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.6 17.2V11a5.4 5.4 0 0 1 10.8 0v6.2Z"/><path d="M4.8 17.2h14.4"/><path d="M10.2 19.8a2 2 0 0 0 3.6 0"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><path d="M4.4 9.6h15.2v3H4.4z"/><path d="M5.8 12.6h12.4v6.8H5.8z"/><path d="M12 9.6v9.8"/><path d="M12 9.6C10.6 7.4 9.4 6.2 8.4 6.2a1.9 1.9 0 0 0 0 3.4M12 9.6c1.4-2.2 2.6-3.4 3.6-3.4a1.9 1.9 0 0 1 0 3.4"/></symbol>
+  <symbol id="i-wand" viewBox="0 0 24 24"><path d="m6.2 18.4 8.6-8.6"/><path d="m14.2 10.4 3.4-3.4a1.7 1.7 0 0 0-2.4-2.4l-3.4 3.4"/><path d="M5 6.6h2.6M6.3 5.3v2.6M17 15.4h2.6M18.3 14.1v2.6"/></symbol>
+  <symbol id="i-toggles" viewBox="0 0 24 24"><rect x="3.4" y="5.4" width="17.2" height="5.4" rx="2.7"/><circle cx="7.4" cy="8.1" r="1.5" fill="currentColor" stroke="none"/><rect x="3.4" y="13.2" width="17.2" height="5.4" rx="2.7"/><circle cx="16.6" cy="15.9" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M11 5.2a3 3 0 0 0-5 2.2 2.9 2.9 0 0 0-1.4 4.8A3 3 0 0 0 6.6 17c.3 1.4 1.6 2.3 3.1 2.1a1.8 1.8 0 0 0 1.3-1.7Z"/><path d="M13 5.2a3 3 0 0 1 5 2.2 2.9 2.9 0 0 1 1.4 4.8A3 3 0 0 1 17.4 17c-.3 1.4-1.6 2.3-3.1 2.1a1.8 1.8 0 0 1-1.3-1.7Z"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3.6v4M15 3.6v4"/><path d="M6.6 7.6h10.8v3.2a5.4 5.4 0 0 1-10.8 0Z"/><path d="M12 16.2v4.2"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4.2 12a7.8 7.8 0 1 0 2.6-5.8"/><path d="M4 4.4v3.6h3.6"/><path d="M12 8.2V12l3 1.8"/></symbol>
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3.8" y="4.6" width="16.4" height="14.8" rx="2.4"/><path d="M3.8 9.4h16.4M10 9.4v10"/></symbol>
+</svg>
+
+<div class="shell" id="shell">
+  <header class="appbar">
+    <a class="brand" href="#/overview" title="爱丽丝的图片助手">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" class="brand-glyph"><circle cx="10.4" cy="10.4" r="5.6"/><path d="m14.8 14.8 4.4 4.4"/><path d="M10.4 6.6v7.6M6.6 10.4h7.6"/></svg>
+      </span>
+      <span class="brand-text">
+        <strong id="brand-title">爱丽丝的图片助手</strong>
+        <small id="brand-sub">找图 · 溯源 · Pixiv · VLM 复核</small>
+      </span>
+    </a>
+
+    <div class="appbar-actions">
+      <div class="theme-picker">
+        <button class="pill-btn" id="btn-theme" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="切换界面主题">
+          <span class="swatches" id="theme-swatch" aria-hidden="true"></span>
+          <span id="theme-label">奇境</span>
+          <svg class="icon sm" aria-hidden="true"><use href="#i-caret"></use></svg>
+        </button>
+        <div class="theme-menu" id="theme-menu" role="menu" aria-label="界面主题" hidden></div>
+      </div>
+      <button class="pill-btn" id="btn-compact" type="button" aria-pressed="false" aria-label="紧凑模式">
+        <svg class="icon sm" aria-hidden="true"><use href="#i-compact"></use></svg><span>紧凑</span>
+      </button>
+      <button class="pill-btn" id="btn-refresh" type="button" aria-label="重新载入后端数据">
+        <svg class="icon sm" aria-hidden="true"><use href="#i-refresh"></use></svg><span>刷新</span>
+      </button>
+      <button class="pill-btn danger" id="btn-reset" type="button" aria-label="重置界面偏好">
+        <svg class="icon sm" aria-hidden="true"><use href="#i-undo"></use></svg><span id="reset-label">重置偏好</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="tabbar" id="tabbar" role="tablist" aria-label="主导航"></nav>
+
+  <main class="views" id="views">
+    <section class="view" data-view="overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="-1" hidden></section>
+    <section class="view" data-view="search" role="tabpanel" aria-labelledby="tab-search" tabindex="-1" hidden></section>
+    <section class="view" data-view="reverse" role="tabpanel" aria-labelledby="tab-reverse" tabindex="-1" hidden></section>
+    <section class="view" data-view="config" role="tabpanel" aria-labelledby="tab-config" tabindex="-1" hidden></section>
+    <section class="view" data-view="commands" role="tabpanel" aria-labelledby="tab-commands" tabindex="-1" hidden></section>
+    <section class="view" data-view="about" role="tabpanel" aria-labelledby="tab-about" tabindex="-1" hidden></section>
+  </main>
+
+  <footer class="statusbar">
+    <span class="status-left" id="status-left"></span>
+    <span class="status-right" id="status-right"></span>
+  </footer>
+</div>
+
+<div class="boot" id="boot">
+  <span class="boot-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" class="brand-glyph"><circle cx="10.4" cy="10.4" r="5.6"/><path d="m14.8 14.8 4.4 4.4"/><path d="M10.4 6.6v7.6M6.6 10.4h7.6"/></svg>
+  </span>
+  <p id="boot-text">正在连接 AstrBot…</p>
+  <div class="boot-bar" aria-hidden="true"><i></i></div>
+</div>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="图片预览" hidden>
+  <button class="icon-btn lightbox-close" id="lightbox-close" type="button" aria-label="关闭预览">
+    <svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg>
+  </button>
+  <figure class="lightbox-figure">
+    <img id="lightbox-img" alt="预览图" />
+    <figcaption id="lightbox-cap"></figcaption>
+  </figure>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

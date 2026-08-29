@@ -1,16 +1,39 @@
-# -*- coding: utf-8 -*-
-import urllib.parse
+"""搜图神器主图源抓取（Playwright 拦截 XHR）与 Bing 备用图源抓取。"""
+
+from __future__ import annotations
+
 import asyncio
-import aiohttp
 import random
 import re
-from typing import List, Tuple
-from playwright.async_api import (
-    async_playwright,
-    Browser,
-    TimeoutError as PlaywrightTimeoutError,
-)
+import urllib.parse
+
+import aiohttp
 from astrbot.api import logger
+
+try:  # Playwright 属于可选运行时依赖，缺失时必须给出可操作的提示而不是抛裸异常。
+    from playwright.async_api import (
+        Browser,
+        async_playwright,
+    )
+    from playwright.async_api import (
+        TimeoutError as PlaywrightTimeoutError,
+    )
+
+    PLAYWRIGHT_IMPORT_ERROR = ""
+except Exception as _playwright_import_error:
+    Browser = object  # type: ignore[assignment,misc]
+    async_playwright = None  # type: ignore[assignment]
+    PLAYWRIGHT_IMPORT_ERROR = str(_playwright_import_error)
+
+    class PlaywrightTimeoutError(Exception):  # type: ignore[no-redef]
+        """Playwright 不可用时的占位超时异常，保证 except 分支仍可编译。"""
+
+
+# 统一的安装提示：抓取失败最常见的根因就是浏览器内核没装，直接把命令告诉用户。
+PLAYWRIGHT_INSTALL_HINT = (
+    "Playwright 未安装或浏览器内核不可用，请在插件运行环境中执行 "
+    "pip install playwright 后再执行 playwright install chromium，然后重启 AstrBot。"
+)
 
 PLAYWRIGHT_TIMEOUT = 15000
 SCROLL_TIMES = 3
@@ -50,33 +73,51 @@ def is_valid_image_url(u: str) -> bool:
     ]
     if any(domain in low_u for domain in blacklisted_domains):
         return False
-    if any(
+    return not any(
         x in low_u for x in ["avatar", "logo", "icon", "qrcode", "profile", "banner"]
-    ):
-        return False
-    return True
+    )
+
+
+def playwright_available() -> bool:
+    """Playwright 是否可用；供上层在选源前做能力判断。"""
+    return async_playwright is not None
 
 
 class ScraperManager:
-    def __init__(self):
-        self._playwright_mgr = None
-        self._browser: Browser = None
-        self._session = None
-        self._lock = None
+    def __init__(self) -> None:
+        self._playwright_mgr: object | None = None
+        self._browser: Browser | None = None
+        self._session: aiohttp.ClientSession | None = None
+        self._lock: asyncio.Lock | None = None
 
-    def _ensure_primitives(self):
+    def _ensure_primitives(self) -> None:
         if self._lock is None:
             self._lock = asyncio.Lock()
 
+    async def _stop_playwright(self) -> None:
+        """安全停止 playwright 管理器；失败必须留痕，否则句柄泄漏无从排查。"""
+        if not self._playwright_mgr:
+            return
+        try:
+            await asyncio.wait_for(self._playwright_mgr.stop(), timeout=5.0)
+        except Exception as exc:
+            logger.warning("[AliceImageSoutu] 停止 Playwright 管理器失败：%s", exc)
+        finally:
+            self._playwright_mgr = None
+
     async def _get_browser(self) -> Browser:
         self._ensure_primitives()
+        if async_playwright is None:
+            # 明确告知安装命令，而不是抛出 ModuleNotFoundError 让用户自己猜。
+            detail = (
+                " 原始错误：" + PLAYWRIGHT_IMPORT_ERROR
+                if PLAYWRIGHT_IMPORT_ERROR
+                else ""
+            )
+            raise RuntimeError(PLAYWRIGHT_INSTALL_HINT + detail)
         async with self._lock:
             if self._browser is None or not self._browser.is_connected():
-                if self._playwright_mgr:
-                    try:
-                        await self._playwright_mgr.stop()
-                    except Exception:
-                        pass
+                await self._stop_playwright()
 
                 try:
                     self._playwright_mgr = await asyncio.wait_for(
@@ -92,16 +133,13 @@ class ScraperManager:
                         ),
                         timeout=25.0,
                     )
-                except Exception as e:
-                    logger.error(f"Playwright 初始化异常: {e}")
-                    if self._playwright_mgr:
-                        try:
-                            await self._playwright_mgr.stop()
-                        except Exception:
-                            pass
-                        self._playwright_mgr = None
+                except Exception as exc:
+                    logger.error("[AliceImageSoutu] Playwright 初始化异常: %s", exc)
+                    await self._stop_playwright()
                     self._browser = None
-                    raise
+                    raise RuntimeError(
+                        PLAYWRIGHT_INSTALL_HINT + " 原始错误：" + str(exc)
+                    ) from exc
         return self._browser
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -111,23 +149,17 @@ class ScraperManager:
                 self._session = aiohttp.ClientSession()
         return self._session
 
-    async def close_all(self):
+    async def close_all(self) -> None:
         self._ensure_primitives()
         async with self._lock:
             if self._browser:
                 try:
                     await asyncio.wait_for(self._browser.close(), timeout=5.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("[AliceImageSoutu] 关闭浏览器失败：%s", exc)
                 finally:
                     self._browser = None
-            if self._playwright_mgr:
-                try:
-                    await asyncio.wait_for(self._playwright_mgr.stop(), timeout=5.0)
-                except Exception:
-                    pass
-                finally:
-                    self._playwright_mgr = None
+            await self._stop_playwright()
             if self._session and not self._session.closed:
                 await self._session.close()
                 self._session = None
@@ -145,10 +177,10 @@ class ScraperManager:
                     break
         return found
 
-    async def fetch_bing_image_urls(self, keyword: str, target_count: int) -> List[str]:
+    async def fetch_bing_image_urls(self, keyword: str, target_count: int) -> list[str]:
         headers = {"User-Agent": random.choice(USER_AGENTS)}
-        image_urls = []
-        seen_urls = set()
+        image_urls: list[str] = []
+        seen_urls: set[str] = set()
         first, pages_fetched, max_pages = 0, 0, 10
         session = await self._get_session()
         loop = asyncio.get_running_loop()
@@ -175,19 +207,21 @@ class ScraperManager:
                         break
                     image_urls.extend(new_urls)
                     first += 35
-            except Exception as e:
-                logger.debug(f"Bing 备用图源抓取遇到错误: {e}")
+            except Exception as exc:
+                logger.warning("[AliceImageSoutu] Bing 备用图源抓取失败：%s", exc)
                 break
         return image_urls[:target_count]
 
     async def fetch_image_urls(
         self, keyword: str, target_count: int
-    ) -> Tuple[List[str], str]:
-        valid_urls = []
-        seen_urls = set()
+    ) -> tuple[list[str], str]:
+        valid_urls: list[str] = []
+        seen_urls: set[str] = set()
         error_msg = ""
         context = None
         page = None
+        # XHR 回调是高频路径，只对首次解析失败告警，其余降级为 debug，避免刷爆日志。
+        parse_warned = [False]
 
         try:
             browser = await self._get_browser()
@@ -201,8 +235,8 @@ class ScraperManager:
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
 
-            async def handle_response(response):
-                # 🚀 优化点：超限拦截器，防止无意义的内存追加和处理
+            async def handle_response(response) -> None:
+                # 超限拦截器，防止无意义的内存追加和处理
                 if len(valid_urls) >= target_count:
                     return
 
@@ -219,7 +253,7 @@ class ScraperManager:
                         if "data" in json_data and isinstance(json_data["data"], list):
                             for item in json_data["data"]:
                                 if len(valid_urls) >= target_count:
-                                    break  # 🚀 早停退出
+                                    break
                                 large_url = item.get("largeUrl")
                                 width = item.get("width", 0)
                                 if (
@@ -227,15 +261,22 @@ class ScraperManager:
                                     and isinstance(large_url, str)
                                     and large_url.startswith("http")
                                     and width > 400
+                                    and is_valid_image_url(large_url)
+                                    and large_url not in seen_urls
                                 ):
-                                    if (
-                                        is_valid_image_url(large_url)
-                                        and large_url not in seen_urls
-                                    ):
-                                        seen_urls.add(large_url)
-                                        valid_urls.append(large_url)
-                    except Exception:
-                        pass
+                                    seen_urls.add(large_url)
+                                    valid_urls.append(large_url)
+                    except Exception as exc:
+                        if parse_warned[0]:
+                            logger.debug(
+                                "[AliceImageSoutu] 忽略无法解析的 XHR 响应：%s", exc
+                            )
+                        else:
+                            parse_warned[0] = True
+                            logger.warning(
+                                "[AliceImageSoutu] 解析主图源 XHR 响应失败（后续同类错误降级为 debug）：%s",
+                                exc,
+                            )
 
             page.on("response", handle_response)
 
@@ -246,8 +287,9 @@ class ScraperManager:
                 await page.goto(
                     search_url, wait_until="networkidle", timeout=PLAYWRIGHT_TIMEOUT
                 )
-            except PlaywrightTimeoutError:
-                pass
+            except PlaywrightTimeoutError as exc:
+                # networkidle 超时是常态（页面长连接不断流），已拦截到的数据仍然可用。
+                logger.debug("[AliceImageSoutu] 主图源页面加载超时，继续使用已拦截数据：%s", exc)
 
             await page.wait_for_timeout(1000)
             for _ in range(SCROLL_TIMES):
@@ -262,19 +304,19 @@ class ScraperManager:
 
         except asyncio.CancelledError:
             raise
-        except Exception as e:
-            logger.error(f"抓取管线发生异常: {str(e)}")
-            error_msg = f"抓取异常: {e}"
+        except Exception as exc:
+            logger.error("[AliceImageSoutu] 抓取管线发生异常: %s", exc)
+            error_msg = f"抓取异常: {exc}"
         finally:
             if page:
                 try:
                     await asyncio.wait_for(page.close(), timeout=2.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("[AliceImageSoutu] 关闭页面失败：%s", exc)
             if context:
                 try:
                     await asyncio.wait_for(context.close(), timeout=2.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("[AliceImageSoutu] 关闭浏览器上下文失败：%s", exc)
 
         return valid_urls[:target_count], error_msg

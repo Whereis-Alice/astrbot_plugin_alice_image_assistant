@@ -78,7 +78,22 @@ class PixivSelectionPolicy:
                 cleanup_old_recent_sent_illusts,
                 self.config.recent_dedup_retention_days,
             )
+            self._prune_idle_scope_locks()
             self._last_cleanup_at = now
+
+    def _prune_idle_scope_locks(self) -> None:
+        """清理未被持有的空闲会话锁。
+
+        _scope_locks 是无上限的 defaultdict，长期运行时会随会话数只增不减；
+        这里在周期性清理时顺手回收空闲锁（被持有的锁保持不动，避免打断正在进行的选择）。
+        """
+        idle_scopes = [
+            scope_id
+            for scope_id, lock in self._scope_locks.items()
+            if not lock.locked()
+        ]
+        for scope_id in idle_scopes:
+            self._scope_locks.pop(scope_id, None)
 
     async def select(
         self,

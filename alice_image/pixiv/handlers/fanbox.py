@@ -1,19 +1,19 @@
-import re
-import os
 import html as html_lib
+import os
+import re
 from typing import Any
 from urllib.parse import urljoin
 
 import aiohttp
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-import astrbot.api.message_components as Comp
 
 from ..utils.help import get_help_message
 from ..utils.pixiv_utils import (
-    download_image,
     _build_image_from_bytes,
     _build_image_from_url,
+    download_image,
 )
 
 
@@ -118,15 +118,14 @@ class FanboxHandler:
                 headers["Cookie"] = cookie
 
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                url, headers=headers, proxy=self._get_proxy()
-            ) as resp:
-                raw = await resp.text()
-                if resp.status != 200:
-                    short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
-                    raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
-                return raw
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            url, headers=headers, proxy=self._get_proxy()
+        ) as resp:
+            raw = await resp.text()
+            if resp.status != 200:
+                short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
+            return raw
 
     async def _fetch_nekohouse_json(self, path: str) -> Any:
         url = f"{self.NEKOHOUSE_BASE}{path}"
@@ -136,21 +135,20 @@ class FanboxHandler:
             "User-Agent": self._fanbox_user_agent(),
         }
         timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                url, headers=headers, proxy=self._get_proxy()
-            ) as resp:
-                raw = await resp.text()
-                if resp.status != 200:
-                    short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
-                    raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
-                try:
-                    return await resp.json(content_type=None)
-                except Exception as exc:
-                    short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
-                    raise RuntimeError(
-                        f"Nekohouse 返回非 JSON 响应: {short_raw}"
-                    ) from exc
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            url, headers=headers, proxy=self._get_proxy()
+        ) as resp:
+            raw = await resp.text()
+            if resp.status != 200:
+                short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
+            try:
+                return await resp.json(content_type=None)
+            except Exception as exc:
+                short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(
+                    f"Nekohouse 返回非 JSON 响应: {short_raw}"
+                ) from exc
 
     @staticmethod
     def _strip_html_tags(text: str) -> str:
@@ -471,27 +469,23 @@ class FanboxHandler:
             headers["Cookie"] = cookie
 
         timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                url, params=params, headers=headers, proxy=self._get_proxy()
-            ) as resp:
-                raw = await resp.text()
-                if resp.status != 200:
-                    short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
-                    raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            url, params=params, headers=headers, proxy=self._get_proxy()
+        ) as resp:
+            raw = await resp.text()
+            if resp.status != 200:
+                short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(f"HTTP {resp.status}: {short_raw}")
 
-                try:
-                    payload = await resp.json(content_type=None)
-                except Exception as exc:
-                    short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
-                    raise RuntimeError(f"Fanbox 返回非 JSON 响应: {short_raw}") from exc
+            try:
+                payload = await resp.json(content_type=None)
+            except Exception as exc:
+                short_raw = raw[:240].replace("\n", " ").replace("\r", " ")
+                raise RuntimeError(f"Fanbox 返回非 JSON 响应: {short_raw}") from exc
 
         if isinstance(payload, dict) and payload.get("error"):
             error = payload.get("error")
-            if isinstance(error, dict):
-                msg = error.get("message") or str(error)
-            else:
-                msg = str(error)
+            msg = error.get("message") or str(error) if isinstance(error, dict) else str(error)
             raise RuntimeError(f"Fanbox API 错误: {msg}")
 
         if isinstance(payload, dict):
@@ -507,15 +501,14 @@ class FanboxHandler:
         }
 
         timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                url, headers=headers, proxy=self._get_proxy()
-            ) as resp:
-                html = await resp.text()
-                if resp.status != 200:
-                    raise RuntimeError(
-                        f"无法从 Pixiv 页面解析 creatorId，HTTP {resp.status}"
-                    )
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            url, headers=headers, proxy=self._get_proxy()
+        ) as resp:
+            html = await resp.text()
+            if resp.status != 200:
+                raise RuntimeError(
+                    f"无法从 Pixiv 页面解析 creatorId，HTTP {resp.status}"
+                )
 
         canonical_match = re.search(
             r'rel=["\']canonical["\'][^>]+href=["\']https://([a-zA-Z0-9][a-zA-Z0-9_-]*)\.fanbox\.cc/?["\']',

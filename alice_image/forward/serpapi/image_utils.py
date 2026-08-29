@@ -7,10 +7,10 @@ import base64
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import aiohttp
-
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Reply
 
@@ -43,8 +43,7 @@ HTTP_CONNECTION_LIMIT = 64
 
 def _read_file_bytes(file_path: str) -> bytes:
     """读取本地文件字节数据（供 to_thread 调用）。"""
-    with open(file_path, "rb") as f:
-        return f.read()
+    return Path(file_path).read_bytes()
 
 
 def _guess_image_type(data: bytes) -> tuple[str, str]:
@@ -123,10 +122,8 @@ class HttpService:
         if not source:
             return None
 
-        if (
-            source.startswith("file://")
-            or re.match(r"^[A-Za-z]:[/\\]", source)
-            or source.startswith("/")
+        if source.startswith(("file://", "/")) or re.match(
+            r"^[A-Za-z]:[/\\]", source
         ):
             if source.startswith("file://"):
                 file_path = source[7:]
@@ -141,14 +138,14 @@ class HttpService:
             try:
                 if await asyncio.to_thread(os.path.exists, file_path):
                     return await asyncio.to_thread(_read_file_bytes, file_path)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.debug(f"[alice_image_serpapi] 读取本地文件失败: {e}")
             return None
 
         if source.startswith("base64://"):
             try:
                 return base64.b64decode(source[9:])
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.debug(f"[alice_image_serpapi] base64 解码失败: {e}")
             return None
 
@@ -157,7 +154,7 @@ class HttpService:
             if match:
                 try:
                     return base64.b64decode(match.group(1))
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.debug(f"[alice_image_serpapi] data URI 解码失败: {e}")
             return None
 
@@ -184,7 +181,7 @@ class HttpService:
                 image_bytes,
                 "Litterbox",
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(f"[alice_image_serpapi] 图床上传异常({host}): {e}")
             return None
 
@@ -281,7 +278,7 @@ class HttpService:
             b64 = await image.convert_to_base64()
             if b64:
                 image_bytes = base64.b64decode(b64)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug(
                 f"[alice_image_serpapi] convert_to_base64 还原图片失败，回退本地读取: {e}"
             )

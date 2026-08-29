@@ -37,11 +37,13 @@ class _RootConfig(dict):
 
 
 class ConfigAndToolTests(unittest.TestCase):
-    def test_schema_has_exactly_two_public_groups(self) -> None:
+    def test_schema_declares_expected_public_groups(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
-        self.assertEqual(list(schema), ["find_image", "reverse_image"])
+        self.assertEqual(list(schema), ["find_image", "reverse_image", "webui"])
         self.assertEqual(schema["find_image"]["description"], "找图模块")
         self.assertEqual(schema["reverse_image"]["description"], "以图搜图模块")
+        self.assertEqual(schema["webui"]["description"], "Dashboard WebUI")
+        self.assertIs(schema["webui"]["items"]["enabled"]["default"], True)
 
     def test_every_pixiv_feature_is_boolean_and_defaulted(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))

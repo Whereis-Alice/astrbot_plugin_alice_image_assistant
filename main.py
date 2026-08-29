@@ -26,10 +26,11 @@ from .alice_image.tools import (
     AliceReverseImageTool,
     AliceSessionImagesTool,
 )
+from .webapi import AliceWebApi, AliceWebService
 
 PLUGIN_ID = "astrbot_plugin_alice_image_assistant"
 PLUGIN_NAME = "爱丽丝的图片助手"
-PLUGIN_VERSION = "1.5.0"
+PLUGIN_VERSION = "1.6.0"
 PLUGIN_REPO = "https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant"
 MAX_COMMAND_RETURN_COUNT = 10
 
@@ -119,6 +120,9 @@ class AliceImageAssistantPlugin(Star):
             self.reverse = AliceReverseController(context, reverse_runtime)
 
         self._register_tools()
+        self._webapi = AliceWebApi(AliceWebService(self), logger=logger)
+        self._registered_routes: list[str] = []
+        self._mount_webapi()
         logger.info("[%s] v%s 已加载", PLUGIN_NAME, PLUGIN_VERSION)
 
     def _register_tools(self) -> None:
@@ -145,6 +149,39 @@ class AliceImageAssistantPlugin(Star):
                 ", ".join(tool.name for tool in tools),
             )
 
+    def _mount_webapi(self) -> None:
+        """把 Dashboard WebUI 的路由挂到 AstrBot 上，任何一步失败都不影响插件本体。"""
+
+        if not section(self.config, "webui").get("enabled", True):
+            logger.info("[%s] WebUI 已在配置中关闭，跳过路由注册", PLUGIN_NAME)
+            return
+        if not self._webapi.available:
+            logger.info(
+                "[%s] 当前 AstrBot 没有可用的 Web 后端，WebUI 未挂载", PLUGIN_NAME
+            )
+            return
+        register = getattr(self.context, "register_web_api", None)
+        if not callable(register):
+            logger.info(
+                "[%s] 当前 AstrBot 版本不支持 register_web_api，WebUI 未挂载",
+                PLUGIN_NAME,
+            )
+            return
+        for route, handler, methods, description in self._webapi.routes():
+            try:
+                register(route, handler, methods, description)
+            except Exception:
+                logger.exception("[%s] WebUI 路由注册失败: %s", PLUGIN_NAME, route)
+                continue
+            self._registered_routes.append(route)
+        if self._registered_routes:
+            logger.info(
+                "[%s] WebUI 已挂载 %d 条路由（backend=%s）",
+                PLUGIN_NAME,
+                len(self._registered_routes),
+                self._webapi.backend,
+            )
+
     async def terminate(self) -> None:
         if self.forward:
             await self.forward.close()
@@ -152,6 +189,7 @@ class AliceImageAssistantPlugin(Star):
             await self.reverse.terminate()
         if self.pixiv:
             await self.pixiv.terminate()
+        self._webapi.service.images.clear()
         logger.info("[%s] 已卸载并释放网络、浏览器与调度资源", PLUGIN_NAME)
 
     def _find_commands_enabled(self) -> bool:

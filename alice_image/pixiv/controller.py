@@ -1,29 +1,27 @@
 import asyncio
-from typing import Dict, Any
-import aiohttp
+from typing import Any
 
+import aiohttp
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context, StarTools
-from astrbot.api import logger
-
-from .utils.database import initialize_database
-from .utils.subscription import SubscriptionService
-from .utils.pixiv_utils import init_pixiv_utils
-from .utils.help import init_help_manager, get_help_message
-from .utils.llm_tool import create_pixiv_llm_tools
-from .utils.selection import PixivSelectionPolicy
-from .utils.tag import set_filter_config_source
-
-from .utils.config import PixivConfig, PixivConfigManager
 
 from .core.client import PixivClientWrapper
-from .handlers.illust import IllustHandler
-from .handlers.user import UserHandler
-from .handlers.novel import NovelHandler
-from .handlers.subscribe import SubscribeHandler
-from .handlers.random_illust import RandomIllustHandler
-from .handlers.misc import MiscHandler
 from .handlers.fanbox import FanboxHandler
+from .handlers.illust import IllustHandler
+from .handlers.misc import MiscHandler
+from .handlers.novel import NovelHandler
+from .handlers.random_illust import RandomIllustHandler
+from .handlers.subscribe import SubscribeHandler
+from .handlers.user import UserHandler
+from .utils.config import PixivConfig, PixivConfigManager
+from .utils.database import initialize_database
+from .utils.help import get_help_message, init_help_manager
+from .utils.llm_tool import create_pixiv_llm_tools
+from .utils.pixiv_utils import init_pixiv_utils
+from .utils.selection import PixivSelectionPolicy
+from .utils.subscription import SubscriptionService
+from .utils.tag import set_filter_config_source
 
 
 class AlicePixivController:
@@ -39,8 +37,8 @@ class AlicePixivController:
     def __init__(
         self,
         context: Context,
-        config: Dict[str, Any],
-        features: Dict[str, Any] | None = None,
+        config: dict[str, Any],
+        features: dict[str, Any] | None = None,
     ):
         """初始化 Pixiv 插件"""
         self.context = context
@@ -141,14 +139,17 @@ class AlicePixivController:
             f"Pixiv 插件：准备初始化LLM工具，client: {'已设置' if self.client else '未设置'}"
         )
         self.llm_tools = create_pixiv_llm_tools(
-            self.client, self.pixiv_config, self.client_wrapper
+            self.client,
+            self.pixiv_config,
+            self.client_wrapper,
+            selection_policy=self.selection_policy,
         )
         logger.info("Pixiv 插件：LLM工具已初始化。")
 
         # LLM 工具由合集入口统一改名、开关并注册。
 
     @staticmethod
-    def info() -> Dict[str, Any]:
+    def info() -> dict[str, Any]:
         """返回插件元数据"""
         return {
             "name": "alice_image_pixiv",
@@ -566,6 +567,6 @@ class AlicePixivController:
             return result
 
         except Exception as e:
-            error_msg = f"LLM搜索时发生错误: {str(e)}"
+            error_msg = f"LLM搜索时发生错误: {e!s}"
             logger.error(error_msg)
             return error_msg

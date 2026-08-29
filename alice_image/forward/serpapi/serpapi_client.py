@@ -7,7 +7,6 @@ import json
 import time
 
 import aiohttp
-
 from astrbot.api import logger
 
 from .image_utils import HTTP_TIMEOUT_SECONDS, HttpService
@@ -148,7 +147,7 @@ class SerpApiClient:
             except asyncio.TimeoutError:
                 last_err = SerpApiError("SerpApi 请求超时")
                 continue
-            except Exception as e:  # noqa: BLE001 - 网络异常换 Key 重试
+            except Exception as e:
                 last_err = e
                 continue
 

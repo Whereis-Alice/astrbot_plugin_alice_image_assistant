@@ -1,18 +1,33 @@
 import asyncio
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api import logger
 
-from ..utils.tag import (
-    build_detail_message,
-    FilterConfig,
-    validate_and_process_tags,
-    process_and_send_illusts,
-    filter_illusts_with_reason,
-    process_and_send_illusts_sorted,
-)
-from ..utils.pixiv_utils import send_pixiv_image, send_forward_message
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
 
 from ..utils.help import get_help_message
+from ..utils.pixiv_utils import send_forward_message, send_pixiv_image
+from ..utils.query_plan import (
+    SORT_DATE_DESC,
+    SORT_POPULAR_DESC,
+    build_search_plan,
+    dedupe_illusts,
+    describe_api_error,
+    detect_popular_desc_degraded,
+    extract_autocomplete_tags,
+    extract_illusts,
+    extract_next_url,
+    has_enough_results,
+    options_from_config,
+    sort_illusts_by_bookmarks,
+)
+from ..utils.tag import (
+    FilterConfig,
+    build_detail_message,
+    filter_illusts_with_reason,
+    item_has_any_exact_tag,
+    process_and_send_illusts,
+    process_and_send_illusts_sorted,
+    validate_and_process_tags,
+)
 from ..utils.url import extract_pixiv_artwork_id
 
 
@@ -33,6 +48,122 @@ class IllustHandler:
         if self.selection_policy is None:
             return None
         return self.selection_policy.callback(event)
+
+    def _sorted_selection_callback(self, event: AstrMessageEvent):
+        """排序场景专用回调：禁用随机采样，避免收藏数/热度排序被打乱。"""
+        if self.selection_policy is None:
+            return None
+        return self.selection_policy.callback(event, randomize=False)
+
+    async def _resolve_normalized_tags(self, query: str, limit: int) -> list[str]:
+        """用 search_autocomplete 把中文关键词归一化成 Pixiv 官方 tag。
+
+        网络调用失败一律返回空列表，调用方随即原样回退到旧的 partial 行为。
+        """
+        if not query.strip() or limit <= 0:
+            return []
+        for method_name in ("search_autocomplete_v2", "search_autocomplete"):
+            method = getattr(self.client, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                result = await asyncio.wait_for(
+                    self.client_wrapper.call_pixiv_api(method, query), timeout=10
+                )
+            except Exception as exc:
+                logger.debug(f"autocomplete({method_name}) 失败，回退原关键词: {exc}")
+                continue
+            tags = extract_autocomplete_tags(result, limit)
+            if tags:
+                logger.info(f"关键词「{query}」归一化为官方 tag: {tags}")
+                return tags
+        return []
+
+    async def _execute_search_plan(
+        self,
+        query: str,
+        *,
+        pages_per_step: int = 1,
+        min_results: int = 10,
+        extra_kwargs: dict | None = None,
+    ) -> tuple[list, bool, str | None]:
+        """按多级搜索计划执行搜索。
+
+        :return: (去重后的候选作品列表, popular_desc 是否被降级, 中文错误提示或 None)
+        """
+        options = options_from_config(self.pixiv_config)
+        normalized_tags: list[str] = []
+        if options.enable_autocomplete:
+            normalized_tags = await self._resolve_normalized_tags(
+                query, options.autocomplete_limit
+            )
+        plan = build_search_plan(
+            query,
+            normalized_tags=normalized_tags,
+            sort=SORT_POPULAR_DESC if options.prefer_popular else SORT_DATE_DESC,
+            options=options,
+        )
+
+        collected: list = []
+        degraded = False
+        last_error: str | None = None
+        target = max(min_results, options.min_results)
+
+        for step in plan:
+            step_illusts: list = []
+            next_params = None
+            for page_index in range(max(pages_per_step, 1)):
+                try:
+                    if page_index == 0:
+                        result = await self.client_wrapper.call_pixiv_api(
+                            self.client.search_illust,
+                            **step.to_search_kwargs(extra=extra_kwargs),
+                        )
+                    else:
+                        if not next_params:
+                            break
+                        result = await self.client_wrapper.call_pixiv_api(
+                            self.client.search_illust, **next_params
+                        )
+                except Exception as exc:
+                    logger.warning(f"搜索（{step.reason}）第 {page_index + 1} 页失败: {exc}")
+                    last_error = "调用 Pixiv 搜索接口失败，请稍后再试。"
+                    break
+
+                error_message = describe_api_error(result)
+                if error_message:
+                    last_error = error_message
+                    logger.warning(f"搜索（{step.reason}）API 报错: {error_message}")
+                    break
+
+                page_illusts = extract_illusts(result)
+                if not page_illusts:
+                    break
+                step_illusts.extend(page_illusts)
+
+                next_url = extract_next_url(result)
+                if not next_url:
+                    break
+                try:
+                    next_params = self.client.parse_qs(next_url)
+                except Exception as exc:
+                    logger.debug(f"解析 next_url 失败: {exc}")
+                    break
+                await asyncio.sleep(0.3)
+
+            if step_illusts:
+                if step.sort == SORT_POPULAR_DESC and detect_popular_desc_degraded(
+                    step_illusts
+                ):
+                    degraded = True
+                collected = dedupe_illusts(collected + step_illusts)
+                logger.info(f"搜索（{step.reason}）累计候选 {len(collected)} 个")
+                if has_enough_results(len(collected), target):
+                    break
+
+        if collected:
+            last_error = None
+        return collected, degraded, last_error
 
     async def pixiv_msg_url(self, event: AstrMessageEvent, msg: str = ""):
         """识别消息中的 Pixiv 作品链接并发送对应作品。"""
@@ -96,16 +227,21 @@ class IllustHandler:
             f"Pixiv 插件：正在搜索标签 - {search_tags}，排除标签 - {exclude_tags}"
         )
         try:
-            # 包装同步搜索调用
-            search_result = await self.client_wrapper.call_pixiv_api(
-                self.client.search_illust,
+            # 走多级搜索计划：autocomplete 归一化 -> exact -> partial -> 标题简介
+            resolved_count = self.pixiv_config.resolve_return_count(return_count)
+            initial_illusts, degraded, error_message = await self._execute_search_plan(
                 search_tags,
-                search_target="partial_match_for_tags",
+                pages_per_step=max(
+                    2, int(getattr(self.pixiv_config, "search_pages", 0) or 0)
+                ),
+                min_results=max(30, resolved_count * 6),
             )
-            initial_illusts = search_result.illusts if search_result.illusts else []
             if not initial_illusts:
-                yield event.plain_result("未找到相关插画。")
+                yield event.plain_result(error_message or "未找到相关插画。")
                 return
+            if degraded:
+                logger.info("热度排序被 Pixiv 降级为时间序，已在本地按收藏数重排")
+                initial_illusts = sort_illusts_by_bookmarks(initial_illusts)
             # 使用统一的作品处理和发送函数
             config = FilterConfig(
                 r18_mode=self.pixiv_config.r18_mode,
@@ -137,7 +273,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：搜索插画时发生错误 - {e}")
-            yield event.plain_result(f"搜索插画时发生错误: {str(e)}")
+            yield event.plain_result("搜索插画时发生错误，请稍后再试或更换关键词。")
 
     async def pixiv_illust_new(
         self,
@@ -228,7 +364,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取新插画作品时发生错误 - {e}")
-            yield event.plain_result(f"获取新插画作品时发生错误: {str(e)}")
+            yield event.plain_result(f"获取新插画作品时发生错误: {e!s}")
 
     async def pixiv_recommended(self, event: AstrMessageEvent, args: str = ""):
         """获取 Pixiv 推荐作品"""
@@ -283,7 +419,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取推荐作品时发生错误 - {e}")
-            yield event.plain_result(f"获取推荐作品时发生错误: {str(e)}")
+            yield event.plain_result(f"获取推荐作品时发生错误: {e!s}")
 
     async def pixiv_and(self, event: AstrMessageEvent, tags: str = ""):
         """处理 /aaP并 命令，进行 AND 逻辑深度搜索"""
@@ -379,22 +515,24 @@ class IllustHandler:
                             self.client.search_illust, **next_params
                         )
 
-                    # 检查 API 返回结果是否有错误字段
-                    if hasattr(json_result, "error") and json_result.error:
+                    # 检查 API 返回结果是否有错误字段（转成可读中文，不回显原始报文）
+                    api_error_message = describe_api_error(json_result)
+                    if api_error_message:
                         logger.error(
-                            f"Pixiv API 返回错误 (页码 {current_page_num}): {json_result.error}"
+                            f"Pixiv API 返回错误 (页码 {current_page_num}): {api_error_message}"
                         )
                         yield event.plain_result(
-                            f"搜索 '{first_tag}' 的第 {current_page_num} 页时 API 返回错误: {json_result.error.get('message', '未知错误')}"
+                            f"搜索「{first_tag}」第 {current_page_num} 页时出错：{api_error_message}"
                         )
                         break
 
                     # 处理有效结果
-                    if json_result.illusts:
+                    page_illusts = extract_illusts(json_result)
+                    if page_illusts:
                         logger.info(
-                            f"Pixiv 插件：AND 搜索 (阶段1: '{first_tag}') 第 {current_page_num} 页找到 {len(json_result.illusts)} 个插画。"
+                            f"Pixiv 插件：AND 搜索 (阶段1: '{first_tag}') 第 {current_page_num} 页找到 {len(page_illusts)} 个插画。"
                         )
-                        all_illusts_from_first_tag.extend(json_result.illusts)
+                        all_illusts_from_first_tag.extend(page_illusts)
                     else:
                         logger.info(
                             f"Pixiv 插件：AND 搜索 (阶段1: '{first_tag}') 第 {current_page_num} 页没有找到插画。"
@@ -423,6 +561,8 @@ class IllustHandler:
                     logger.error(traceback.format_exc())
                     break
 
+            # 多页 extend 不跨页去重，这里统一按 illust.id 去重
+            all_illusts_from_first_tag = dedupe_illusts(all_illusts_from_first_tag)
             logger.info(
                 f"Pixiv 插件：AND 搜索 (阶段1: '{first_tag}') 完成，共获取 {len(all_illusts_from_first_tag)} 个插画，现在开始本地 AND 过滤..."
             )
@@ -430,11 +570,16 @@ class IllustHandler:
             # 本地 AND 过滤
             and_filtered_illusts = []
             if all_illusts_from_first_tag:
-                required_other_tags_lower = {tag.lower() for tag in other_tags}
+                # 同时比对 tag.name 与 tag.translated_name，并对 None 做保护；
+                # 否则中文/英文副标签几乎必然被过滤为 0（原实现只比对 name 且要求精确相等）。
+                required_other_tags = [
+                    str(tag).strip() for tag in other_tags if str(tag).strip()
+                ]
                 for illust in all_illusts_from_first_tag:
-                    illust_tags_lower = {tag.name.lower() for tag in illust.tags}
-                    # 检查是否包含所有其他必需标签 (第一个标签已通过 API 搜索保证存在)
-                    if required_other_tags_lower.issubset(illust_tags_lower):
+                    if all(
+                        item_has_any_exact_tag(illust, [tag])
+                        for tag in required_other_tags
+                    ):
                         and_filtered_illusts.append(illust)
 
             initial_count = len(and_filtered_illusts)
@@ -473,7 +618,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：AND 深度搜索时发生未预料的错误 - {e}")
-            yield event.plain_result(f"AND 深度搜索时发生错误: {str(e)}")
+            yield event.plain_result(f"AND 深度搜索时发生错误: {e!s}")
             import traceback
 
             logger.error(traceback.format_exc())
@@ -563,7 +708,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取作品详情时发生错误 - {e}")
-            yield event.plain_result(f"获取作品详情时发生错误: {str(e)}")
+            yield event.plain_result(f"获取作品详情时发生错误: {e!s}")
             import traceback
 
             logger.error(traceback.format_exc())
@@ -701,7 +846,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取排行榜时发生错误 - {e}")
-            yield event.plain_result(f"获取排行榜时发生错误: {str(e)}")
+            yield event.plain_result(f"获取排行榜时发生错误: {e!s}")
 
     async def pixiv_related(self, event: AstrMessageEvent, illust_id: str = ""):
         """获取与指定作品相关的其他作品"""
@@ -766,7 +911,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取相关作品时发生错误 - {e}")
-            yield event.plain_result(f"获取相关作品时发生错误: {str(e)}")
+            yield event.plain_result(f"获取相关作品时发生错误: {e!s}")
 
     async def pixiv_deepsearch(self, event: AstrMessageEvent, tags: str):
         """
@@ -846,11 +991,16 @@ class IllustHandler:
                 json_result = await self.client_wrapper.call_pixiv_api(
                     self.client.search_illust, **next_params
                 )
-                if not json_result or not hasattr(json_result, "illusts"):
+                deep_error_message = describe_api_error(json_result)
+                if deep_error_message:
+                    logger.warning(f"深度搜索 API 报错: {deep_error_message}")
+                    if not all_illusts:
+                        yield event.plain_result(deep_error_message)
+                        return
                     break
 
                 # 收集当前页的插画
-                current_illusts = json_result.illusts
+                current_illusts = extract_illusts(json_result)
                 if current_illusts:
                     all_illusts.extend(current_illusts)
                     page_count += 1
@@ -870,7 +1020,7 @@ class IllustHandler:
                     break
 
                 # 获取下一页参数
-                next_url = json_result.next_url
+                next_url = extract_next_url(json_result)
                 next_params = self.client.parse_qs(next_url) if next_url else None
 
                 # 避免请求过于频繁
@@ -881,6 +1031,14 @@ class IllustHandler:
             if not all_illusts:
                 yield event.plain_result(f"深度搜索未找到与「{tag_str}」相关的插画。")
                 return
+
+            # 跨页去重；popular_desc 被降级时本地按收藏数重排
+            all_illusts = dedupe_illusts(all_illusts)
+            if detect_popular_desc_degraded(all_illusts):
+                logger.info(
+                    "深度搜索：popular_desc 被 Pixiv 降级为时间序（非 Premium 账号），已本地按收藏数重排"
+                )
+                all_illusts = sort_illusts_by_bookmarks(all_illusts)
 
             # 记录找到的总数量
             initial_count = len(all_illusts)
@@ -923,7 +1081,7 @@ class IllustHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：深度搜索时发生错误 - {e}")
-            yield event.plain_result(f"深度搜索时发生错误: {str(e)}")
+            yield event.plain_result("深度搜索时发生错误，请稍后再试或缩小搜索范围。")
             import traceback
 
             logger.error(traceback.format_exc())
@@ -1114,7 +1272,7 @@ class IllustHandler:
             import traceback
 
             logger.error(traceback.format_exc())
-            yield event.plain_result(f"获取作品评论时发生错误: {str(e)}")
+            yield event.plain_result(f"获取作品评论时发生错误: {e!s}")
 
     async def pixiv_showcase_article(
         self, event: AstrMessageEvent, showcase_id: str = ""
@@ -1313,7 +1471,7 @@ class IllustHandler:
             import traceback
 
             logger.error(traceback.format_exc())
-            yield event.plain_result(f"获取特辑详情时发生错误: {str(e)}")
+            yield event.plain_result(f"获取特辑详情时发生错误: {e!s}")
 
     async def pixiv_hot(
         self,
@@ -1414,7 +1572,8 @@ class IllustHandler:
                         search_kwargs = {
                             "word": search_tags,
                             "search_target": "partial_match_for_tags",
-                            "sort": "date_desc",
+                            # 直接让 Pixiv 侧按热度排序；非会员被降级时下面会本地重排
+                            "sort": "popular_desc",
                             "filter": "for_ios",
                         }
                         if duration_map[duration_param]:
@@ -1430,10 +1589,12 @@ class IllustHandler:
                             self.client.search_illust, **next_params
                         )
 
-                    if not json_result or not hasattr(json_result, "illusts"):
+                    hot_error_message = describe_api_error(json_result)
+                    if hot_error_message:
+                        logger.warning(f"热度搜索 API 报错: {hot_error_message}")
                         break
 
-                    current_illusts = json_result.illusts
+                    current_illusts = extract_illusts(json_result)
                     if current_illusts:
                         all_illusts.extend(current_illusts)
                         page_count += 1
@@ -1443,8 +1604,9 @@ class IllustHandler:
                     else:
                         break
 
-                    if hasattr(json_result, "next_url") and json_result.next_url:
-                        next_params = self.client.parse_qs(json_result.next_url)
+                    hot_next_url = extract_next_url(json_result)
+                    if hot_next_url:
+                        next_params = self.client.parse_qs(hot_next_url)
                     else:
                         break
 
@@ -1460,12 +1622,14 @@ class IllustHandler:
                 )
                 return
 
-            # 按收藏数降序排序
-            sorted_illusts = sorted(
-                all_illusts,
-                key=lambda x: getattr(x, "total_bookmarks", 0),
-                reverse=True,
-            )
+            # 先按 illust.id 跨页去重，再按收藏数降序排序
+            deduped_illusts = dedupe_illusts(all_illusts)
+            popular_degraded = detect_popular_desc_degraded(deduped_illusts)
+            if popular_degraded:
+                logger.info(
+                    "热度搜索：popular_desc 被 Pixiv 降级为时间序（通常因为非 Premium 账号），改用本地收藏数排序"
+                )
+            sorted_illusts = sort_illusts_by_bookmarks(deduped_illusts)
 
             logger.info(
                 f"热度搜索完成，共 {len(sorted_illusts)} 个作品，已按收藏数排序"
@@ -1473,9 +1637,15 @@ class IllustHandler:
 
             if not self.pixiv_config.single_response_mode:
                 top_bookmark = getattr(sorted_illusts[0], "total_bookmarks", 0)
+                degraded_hint = (
+                    "\nℹ️ 当前账号非 Pixiv 会员，官方热度排序已被降级为时间序，"
+                    "结果已在本地按收藏数重排。"
+                    if popular_degraded
+                    else ""
+                )
                 yield event.plain_result(
                     f"✅ 搜索完成！共找到 {len(sorted_illusts)} 个作品\n"
-                    f"🏆 最高收藏数: {top_bookmark}\n正在发送热门作品..."
+                    f"🏆 最高收藏数: {top_bookmark}{degraded_hint}\n正在发送热门作品..."
                 )
 
             config = FilterConfig(
@@ -1502,7 +1672,7 @@ class IllustHandler:
                 send_pixiv_image,
                 send_forward_message,
                 is_novel=False,
-                selection_func=self._selection_callback(event),
+                selection_func=self._sorted_selection_callback(event),
             ):
                 yield result
 
@@ -1511,4 +1681,4 @@ class IllustHandler:
             import traceback
 
             logger.error(traceback.format_exc())
-            yield event.plain_result(f"热度搜索时发生错误: {str(e)}")
+            yield event.plain_result("热度搜索时发生错误，请稍后再试或更换关键词。")

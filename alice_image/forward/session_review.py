@@ -134,7 +134,7 @@ class CurrentSessionReviewProvider:
                 return conversation, live_messages
             history = json.loads(str(getattr(conversation, "history", "") or "[]"))
             return conversation, history if isinstance(history, list) else []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("[AliceImageReview] 读取当前会话历史失败: %s", exc)
             return None, live_messages or []
 
@@ -146,7 +146,7 @@ class CurrentSessionReviewProvider:
                 persona = getter(persona_id)
                 if persona is not None:
                     return persona
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug(
                     "[AliceImageReview] 旧版人格按 ID 读取失败: %s",
                     exc,
@@ -208,7 +208,7 @@ class CurrentSessionReviewProvider:
                     persona = self._legacy_persona_by_id(manager, persona_id)
                 if persona is None and persona_id != "[%None]":
                     persona = await manager.get_default_persona_v3(umo)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("[AliceImageReview] 解析当前会话人格失败: %s", exc)
             return "", []
 

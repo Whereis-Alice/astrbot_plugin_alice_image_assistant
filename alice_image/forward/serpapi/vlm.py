@@ -127,7 +127,7 @@ async def select_from_collage(
 
             raise ValueError("VLM 响应未包含可解析的 selected_indices 列表。")
 
-        except Exception as e:  # noqa: BLE001 - 重试
+        except Exception as e:
             logger.warning(
                 f"[alice_image_serpapi] VLM 调用第 {attempt + 1}/{retries} 次失败: {e}"
             )

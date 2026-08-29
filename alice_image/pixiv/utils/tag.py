@@ -4,9 +4,16 @@ tag.py
 """
 
 import random
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import List, Optional
+
+try:  # pragma: no cover - AstrBot 运行时可用，单测环境下降级为标准 logging
+    from astrbot.api import logger as _MODULE_LOGGER
+except Exception:  # pragma: no cover
+    import logging
+
+    _MODULE_LOGGER = logging.getLogger(__name__)
 
 # R18 与 AI 敏感词列表
 R18_BADWORDS = [s.lower() for s in ["R-18", "R18", "R18+"]]
@@ -29,21 +36,21 @@ class FilterConfig:
     r18_mode: str
     ai_filter_mode: str
     ai_detection_mode: str = "field_or_tag"
-    display_tag_str: Optional[str] = None
-    first_tag: Optional[str] = None
-    all_illusts_from_first_tag: Optional[List] = None
+    display_tag_str: str | None = None
+    first_tag: str | None = None
+    all_illusts_from_first_tag: list | None = None
     return_count: int = 1
-    logger: Optional[Callable] = None
+    logger: Callable | None = None
     show_filter_result: bool = True
-    excluded_tags: Optional[List[str]] = None
+    excluded_tags: list[str] | None = None
     filter_r18g_only: bool = False
     pixiv_urlsearch_enabled: bool = True
     single_response_mode: bool = False
     forward_threshold: bool = False
     show_details: bool = True
-    min_bookmarks: Optional[int] = None
-    min_views: Optional[int] = None
-    min_likes: Optional[int] = None
+    min_bookmarks: int | None = None
+    min_views: int | None = None
+    min_likes: int | None = None
     enable_stat_filters: bool = True
 
 
@@ -114,16 +121,24 @@ def _extract_tag_translated_name(tag) -> str:
     return ""
 
 
-def _extract_tag_names(tags) -> List[str]:
-    """Normalize Pixiv tags into a plain name list."""
+def _extract_tag_names(tags) -> list[str]:
+    """把 Pixiv 标签归一化成名称列表（同时包含原名与中文/英文译名）。
+
+    仅取 name 会让「只有译名命中」的标签全部漏判（R18/AI/排除标签判定都依赖本函数），
+    因此这里把 translated_name 一并产出。
+    """
     if not tags:
         return []
 
-    if isinstance(tags, (list, tuple, set)):
-        return [name for name in (_extract_tag_name(tag) for tag in tags) if name]
+    if not isinstance(tags, (list, tuple, set)):
+        tags = [tags]
 
-    name = _extract_tag_name(tags)
-    return [name] if name else []
+    names: list[str] = []
+    for tag in tags:
+        for name in (_extract_tag_name(tag), _extract_tag_translated_name(tag)):
+            if name:
+                names.append(name)
+    return names
 
 
 def item_has_any_exact_tag(item, target_tags) -> bool:
@@ -145,6 +160,36 @@ def item_has_any_exact_tag(item, target_tags) -> bool:
     for tag in raw_tags:
         names = (_extract_tag_name(tag), _extract_tag_translated_name(tag))
         if any(name and name.casefold() in normalized_targets for name in names):
+            return True
+    return False
+
+
+def _contains_whole_word(name: str, normalized_targets: list[str]) -> bool:
+    """判断标签名是否以「整词」形式包含任一目标词。
+
+    - 目标词为纯 ASCII 字母数字时，按「非字母数字为分隔符」切词后做整词比对，
+      这样排除 "ai" 不会误杀 "maid"/"waist"。
+    - 目标词含非 ASCII 字符（日文/中文标签没有空格分词）时退回子串匹配，
+      这是 CJK 场景下唯一可行的近似做法。
+    """
+    if not name:
+        return False
+
+    lname = name.casefold()
+    tokens = {token for token in re.split(r"[^0-9a-z]+", lname) if token}
+
+    for target in normalized_targets:
+        if not target:
+            continue
+        if target.isascii() and target.replace(" ", "").isalnum():
+            # 目标词自身可能含空格（如 "original character"），先整体比对再按词比对
+            if " " in target:
+                if target in lname:
+                    return True
+                continue
+            if target in tokens:
+                return True
+        elif target in lname:
             return True
     return False
 
@@ -190,13 +235,12 @@ def is_r18g(item):
     return False
 
 
-def _is_ai_by_field(item):
-    """根据 Pixiv 字段判断 AI。"""
+def _is_ai_by_field(item) -> bool:
+    """根据 Pixiv 字段判断 AI（缺字段时显式返回 False，避免隐式 None）。"""
     ai_type = _to_int(
         _get_value(item, "illust_ai_type", "illustAiType", "ai_type", "aiType")
     )
-    if ai_type == 2:
-        return True
+    return ai_type == 2
 
 
 def _is_ai_by_tag(item):
@@ -266,7 +310,41 @@ def _get_like_count(item):
     )
 
 
-def _get_low_stat_reasons(illusts: List, config: FilterConfig) -> List[str]:
+# Pixiv app-api（AppPixivAPI）的插画对象并不返回点赞数字段，
+# 因此 min_likes 在绝大多数链路上无法生效。为了避免「静默失效」，
+# 首次遇到缺失字段时打一条 warning，然后跳过该阈值。
+_LIKE_FIELD_MISSING_WARNED = False
+
+
+def _warn_like_field_missing(config: FilterConfig, threshold: int) -> None:
+    """点赞字段缺失时告警一次（避免每张图刷日志）。"""
+    global _LIKE_FIELD_MISSING_WARNED
+    if _LIKE_FIELD_MISSING_WARNED:
+        return
+    _LIKE_FIELD_MISSING_WARNED = True
+    message = (
+        f"min_likes={threshold} 已配置，但 Pixiv app-api 未返回点赞数字段"
+        "（total_like/like_count 均不存在），本次及后续将跳过点赞数阈值过滤。"
+        "如需按热度筛选请改用 min_bookmarks。"
+    )
+    target_logger = getattr(config, "logger", None) or _MODULE_LOGGER
+    warn = getattr(target_logger, "warning", None)
+    if callable(warn):
+        warn(message)
+
+
+def _is_below_like_threshold(item, threshold: int, config: FilterConfig) -> bool:
+    """点赞阈值判定：字段缺失时告警并跳过（不静默、不误杀）。"""
+    if threshold <= 0:
+        return False
+    value = _get_like_count(item)
+    if value is None:
+        _warn_like_field_missing(config, threshold)
+        return False
+    return value < threshold
+
+
+def _get_low_stat_reasons(illusts: list, config: FilterConfig) -> list[str]:
     """生成命中的互动阈值原因列表。"""
     reasons = []
     min_bookmarks = _resolve_threshold(config, "min_bookmarks")
@@ -283,7 +361,7 @@ def _get_low_stat_reasons(illusts: List, config: FilterConfig) -> List[str]:
     ):
         reasons.append(f"阅读量低于 {min_views}")
     if min_likes > 0 and any(
-        _is_below_threshold(_get_like_count(item), min_likes) for item in illusts
+        _is_below_like_threshold(item, min_likes, config) for item in illusts
     ):
         reasons.append(f"点赞数低于 {min_likes}")
 
@@ -325,16 +403,18 @@ def _apply_filters(item, config: FilterConfig) -> bool:
             _get_view_count(item), _resolve_threshold(config, "min_views")
         ):
             return False
-        if _is_below_threshold(
-            _get_like_count(item), _resolve_threshold(config, "min_likes")
+        # min_bookmarks 是唯一在 app-api 上稳定可用的热度下限；
+        # 与 sort="popular_desc" 配合时可显著提升找图精准度（先按热度排，再砍掉长尾）。
+        if _is_below_like_threshold(
+            item, _resolve_threshold(config, "min_likes"), config
         ):
             return False
     return True
 
 
 def _generate_filter_messages(
-    initial_count: int, filtered_count: int, config: FilterConfig, illusts: List
-) -> List[str]:
+    initial_count: int, filtered_count: int, config: FilterConfig, illusts: list
+) -> list[str]:
     """生成过滤结果消息"""
     filter_msgs = []
 
@@ -374,8 +454,8 @@ def _generate_filter_messages(
 
 
 def _generate_no_result_messages(
-    initial_count: int, config: FilterConfig, illusts: List
-) -> List[str]:
+    initial_count: int, config: FilterConfig, illusts: list
+) -> list[str]:
     """生成无结果时的详细消息"""
     msgs = []
     no_result_reason = []
@@ -443,7 +523,7 @@ def filter_illusts_with_reason(illusts, config: FilterConfig):
 
 
 def _build_single_response_summary(
-    initial_count: int, filtered_count: int, send_count: int, filter_msgs: List[str]
+    initial_count: int, filtered_count: int, send_count: int, filter_msgs: list[str]
 ) -> str:
     """构建单消息模式下的汇总文本。"""
     summary_lines = [
@@ -512,16 +592,12 @@ def build_detail_message(item, is_novel=False):
             f"链接: {link}"
         )
         return detail_message
-    else:
-        title = getattr(item, "title", "")
-        author = getattr(item, "user", None)
-        if author and hasattr(author, "name"):
-            author = author.name
-        else:
-            author = getattr(item, "author", "")
-        tags_str = format_tags(getattr(item, "tags", []))
-        link = f"https://www.pixiv.net/artworks/{item.id}"
-        return f"标题: {title}\n作者: {author}\n标签: {tags_str}\n链接: {link}"
+    title = getattr(item, "title", "")
+    author = getattr(item, "user", None)
+    author = author.name if author and hasattr(author, "name") else getattr(item, "author", "")
+    tags_str = format_tags(getattr(item, "tags", []))
+    link = f"https://www.pixiv.net/artworks/{item.id}"
+    return f"标题: {title}\n作者: {author}\n标签: {tags_str}\n链接: {link}"
 
 
 def has_excluded_tags(item, excluded_tags):
@@ -538,9 +614,21 @@ def has_excluded_tags(item, excluded_tags):
     if not excluded_tags:
         return False
 
+    # 历史实现用子串匹配（excluded_tag in lname），排除 "ai" 会误杀 "maid"/"waist"。
+    # 这里改成整词/精确匹配，并复用 item_has_any_exact_tag 的归一化逻辑（同时比对 name 与 translated_name）。
+    if item_has_any_exact_tag(item, excluded_tags):
+        return True
+
+    normalized_excluded = [
+        str(tag).strip().casefold()
+        for tag in excluded_tags
+        if tag is not None and str(tag).strip()
+    ]
+    if not normalized_excluded:
+        return False
+
     for name in _extract_tag_names(_get_value(item, "tags") or []):
-        lname = name.lower()
-        if any(excluded_tag in lname for excluded_tag in excluded_tags):
+        if _contains_whole_word(name, normalized_excluded):
             return True
     return False
 
@@ -775,7 +863,10 @@ def validate_and_process_tags(cleaned_tags):
         conflict_list = "、".join(conflict_tags)
         return {
             "success": False,
-            "error_message": f"标签冲突：以下标签同时出现在包含和排除列表中：{conflict_list}\n你药剂把干啥",
+            "error_message": (
+                f"标签冲突：以下标签同时出现在包含和排除列表中：{conflict_list}\n"
+                "请从包含或排除列表中去掉重复标签后重试"
+            ),
             "include_tags": [],
             "exclude_tags": [],
             "search_tags": "",
@@ -824,12 +915,12 @@ def sample_illusts(illusts, count, shuffle=False):
     count_to_send = min(len(illusts), count)
     if count_to_send > 0:
         if shuffle:
-            random.shuffle(illusts)
-            return illusts[:count_to_send]
-        else:
-            return random.sample(illusts, count_to_send)
-    else:
-        return []
+            # 对副本打乱，避免 random.shuffle 原地污染上游候选列表的顺序
+            shuffled = list(illusts)
+            random.shuffle(shuffled)
+            return shuffled[:count_to_send]
+        return random.sample(list(illusts), count_to_send)
+    return []
 
 
 async def process_and_send_illusts_sorted(

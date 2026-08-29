@@ -1,7 +1,26 @@
+from __future__ import annotations
+
 import asyncio
+import time
+from collections.abc import Callable
+from typing import Any
 
 from astrbot.api import logger
-from pixivpy3 import ByPassSniApi, PixivError, AppPixivAPI
+from pixivpy3 import AppPixivAPI, ByPassSniApi, PixivError
+
+#: DoH 回退结果的有效期（秒）。超过后允许重新尝试一次 DoH 解析，
+#: 避免网络恢复/切换后被「只允许一次回退」的旧逻辑永久锁死在认证失败状态。
+_BYPASS_RETRY_TTL_SECONDS = 300.0
+
+#: 单次 Pixiv API 调用的超时时间（秒），防止网络卡死让指令永久挂起。
+_API_CALL_TIMEOUT_SECONDS = 30.0
+
+#: 单次 Pixiv API 调用的最大尝试次数（含首次）。
+_API_CALL_MAX_ATTEMPTS = 3
+
+#: Token 刷新失败时的指数退避上下限（秒）。
+_REFRESH_BACKOFF_BASE_SECONDS = 60.0
+_REFRESH_BACKOFF_MAX_SECONDS = 1800.0
 
 
 class PixivClientWrapper:
@@ -11,7 +30,8 @@ class PixivClientWrapper:
         self.pixiv_config = pixiv_config
         self._refresh_task: asyncio.Task | None = None
         self._auth_lock = asyncio.Lock()
-        self._bypass_resolution_attempted = False
+        # DoH 回退的最近一次尝试时间戳（None 表示从未尝试过）
+        self._bypass_attempted_at: float | None = None
 
         # 根据是否配置代理选择不同的 API 客户端
         if pixiv_config.proxy:
@@ -64,7 +84,7 @@ class PixivClientWrapper:
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    if "Answer" in data and data["Answer"]:
+                    if data.get("Answer"):
                         ip = data["Answer"][0]["data"]
                         api.hosts = f"https://{ip}"
                         return api.hosts
@@ -78,21 +98,29 @@ class PixivClientWrapper:
         text = str(exc).lower()
         return "check refresh_token" in text or "invalid_grant" in text
 
+    def _bypass_retry_allowed(self) -> bool:
+        """判断是否允许再次尝试 DoH 回退（带 TTL，不再是一次性开关）。"""
+        if self._bypass_attempted_at is None:
+            return True
+        return (time.monotonic() - self._bypass_attempted_at) >= _BYPASS_RETRY_TTL_SECONDS
+
     def _authenticate_sync(self, refresh_token: str) -> None:
-        """在线程中认证；直连网络失败时只尝试一次 DoH 回退。"""
+        """在线程中认证；直连网络失败时按 TTL 允许重新尝试 DoH 回退。"""
         try:
             self.client_api.auth(refresh_token=refresh_token)
+            # 认证成功后清空回退状态，下次网络故障可以立刻重试 DoH
+            self._bypass_attempted_at = None
             return
         except Exception as direct_error:
             should_try_bypass = (
                 isinstance(self.client_api, ByPassSniApi)
-                and not self._bypass_resolution_attempted
+                and self._bypass_retry_allowed()
                 and not self._is_refresh_token_error(direct_error)
             )
             if not should_try_bypass:
                 raise
 
-            self._bypass_resolution_attempted = True
+            self._bypass_attempted_at = time.monotonic()
             logger.warning("Pixiv 插件：直连认证失败，尝试 DoH 解析后重试。")
             hosts = self._require_appapi_hosts_with_cn_doh(self.client_api)
             if not hosts:
@@ -119,6 +147,7 @@ class PixivClientWrapper:
 
     async def periodic_token_refresh(self):
         """定期尝试使用 refresh_token 进行认证以保持其活性"""
+        failure_count = 0
         while True:
             try:
                 # 先等待指定间隔
@@ -142,7 +171,19 @@ class PixivClientWrapper:
                 logger.info("Pixiv Token 刷新任务：尝试使用 Refresh Token 进行认证...")
                 try:
                     if not await self.authenticate():
+                        # 刷新失败：指数退避后重试，并给出告警而不是静默 continue
+                        failure_count += 1
+                        backoff = min(
+                            _REFRESH_BACKOFF_BASE_SECONDS * (2 ** (failure_count - 1)),
+                            _REFRESH_BACKOFF_MAX_SECONDS,
+                        )
+                        logger.warning(
+                            f"Pixiv Token 刷新任务：连续第 {failure_count} 次认证失败，"
+                            f"将在 {backoff:.0f} 秒后重试（请检查 refresh_token 与网络）。"
+                        )
+                        await asyncio.sleep(backoff)
                         continue
+                    failure_count = 0
                     logger.info("Pixiv Token 刷新任务：认证调用成功。")
 
                 except PixivError as pe:
@@ -199,6 +240,40 @@ class PixivClientWrapper:
         except Exception as e:
             logger.error(f"等待 Pixiv Token 刷新任务取消时发生错误: {e}")
 
-    async def call_pixiv_api(self, func, *args, **kwargs):
-        """异步调用 Pixiv API 的辅助方法"""
-        return await asyncio.to_thread(func, *args, **kwargs)
+    async def call_pixiv_api(self, func: Callable[..., Any], *args, **kwargs) -> Any:
+        """异步调用 Pixiv API 的辅助方法（带超时与有限重试）。
+
+        Pixiv 的 app-api 调用全部是只读查询，重试是安全的。
+        没有超时保护时，单次网络卡死会让对应指令永久挂起。
+        """
+        func_name = getattr(func, "__name__", str(func))
+        last_error: BaseException | None = None
+
+        for attempt in range(1, _API_CALL_MAX_ATTEMPTS + 1):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(func, *args, **kwargs),
+                    timeout=_API_CALL_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError as exc:
+                last_error = exc
+                logger.warning(
+                    f"Pixiv 插件：调用 {func_name} 第 {attempt} 次超时"
+                    f"（{_API_CALL_TIMEOUT_SECONDS:.0f}s）。"
+                )
+            except Exception as exc:
+                last_error = exc
+                if self._is_refresh_token_error(exc):
+                    raise
+                logger.warning(
+                    f"Pixiv 插件：调用 {func_name} 第 {attempt} 次失败 - "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+            if attempt < _API_CALL_MAX_ATTEMPTS:
+                await asyncio.sleep(min(2.0 * attempt, 5.0))
+
+        assert last_error is not None
+        raise last_error

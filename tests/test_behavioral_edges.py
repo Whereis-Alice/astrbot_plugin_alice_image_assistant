@@ -207,7 +207,7 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
             api_proxy_host="",
             refresh_token="",
             refresh_interval=180,
-            get_requests_kwargs=lambda: {},
+            get_requests_kwargs=dict,
         )
         with patch.object(
             PixivClientWrapper,

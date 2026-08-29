@@ -1,5 +1,13 @@
-import peewee as pw
+from __future__ import annotations
+
+import functools
+import inspect
+import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any, TypeVar
+
+import peewee as pw
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 
@@ -9,7 +17,38 @@ data_dir.mkdir(parents=True, exist_ok=True)
 
 # 数据库文件路径
 db_path = data_dir / "subscriptions.db"
-db = pw.SqliteDatabase(str(db_path))
+# 所有数据库函数都会通过 asyncio.to_thread 在线程池里访问，
+# 必须开 WAL（读写不互斥）并给写锁一个等待窗口，否则并发写会直接抛 "database is locked"。
+db = pw.SqliteDatabase(
+    str(db_path),
+    pragmas={
+        "journal_mode": "wal",
+        "busy_timeout": 5000,
+        "synchronous": 1,
+        "foreign_keys": 0,
+    },
+)
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _with_db(func: _F) -> _F:
+    """给数据库函数套上连接上下文，确保线程池里建立的连接会被显式归还。
+
+    peewee 的 connection_context 允许安全嵌套（只有自己打开的连接才会被关闭），
+    所以互相调用的数据库函数不会互相影响。
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            with db.connection_context():
+                return func(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - 仅在连接层异常时触发
+            logger.error(f"数据库连接异常({func.__name__}): {exc}")
+            raise
+
+    return wrapper  # type: ignore[return-value]
 
 
 class BaseModel(pw.Model):
@@ -207,7 +246,7 @@ def add_subscription(
     session_id_json: str,
     sub_type: str,
     target_id: str,
-    target_name: str = None,
+    target_name: str | None = None,
     initial_illust_id: int = 0,
 ) -> (bool, str):
     """
@@ -262,9 +301,8 @@ def remove_subscription(chat_id: str, sub_type: str, target_id: str) -> (bool, s
         if deleted_rows > 0:
             logger.info(f"聊天 {chat_id} 成功移除了对 artist: {target_id} 的订阅。")
             return True, f"成功取消对画师: {target_id} 的订阅。"
-        else:
-            logger.warning(f"聊天 {chat_id} 尝试移除不存在的订阅 artist: {target_id}。")
-            return False, f"您没有订阅画师: {target_id}。"
+        logger.warning(f"聊天 {chat_id} 尝试移除不存在的订阅 artist: {target_id}。")
+        return False, f"您没有订阅画师: {target_id}。"
     except Exception as e:
         logger.error(f"移除订阅时发生错误: {e}")
         return False, f"移除订阅时发生未知错误: {e}"
@@ -333,8 +371,7 @@ def remove_random_tag(chat_id: str, tag_index: int) -> (bool, str):
             tag_name = tag_entry.tag
             tag_entry.delete_instance()
             return True, f"成功删除标签: {tag_name}"
-        else:
-            return False, "无效的标签序号。"
+        return False, "无效的标签序号。"
     except Exception as e:
         logger.error(f"删除随机标签失败: {e}")
         return False, f"删除失败: {e}"
@@ -356,23 +393,14 @@ def get_random_tags(chat_id: str) -> list:
 def get_all_random_search_groups() -> list:
     """获取所有启用了随机搜索的群聊ID"""
     try:
-        # 获取所有有随机搜索标签的群组
-        all_groups_query = RandomSearchTag.select(RandomSearchTag.chat_id).distinct()
-        all_groups = [row.chat_id for row in all_groups_query]
-
-        # 过滤掉完全暂停的群组
-        active_groups = []
-        for chat_id in all_groups:
-            # 检查该群组是否所有标签都被暂停
-            tags = list(
-                RandomSearchTag.select().where(RandomSearchTag.chat_id == chat_id)
-            )
-            if tags:
-                # 如果至少有一个标签未暂停，则认为群组是活跃的
-                if any(not tag.is_suspended for tag in tags):
-                    active_groups.append(chat_id)
-
-        return active_groups
+        # 本函数被调度器每分钟调用一次，历史实现是「先 distinct 再逐群查询」的 N+1，
+        # 这里改成单条 distinct 查询：只要该群还有未暂停的标签就算活跃。
+        query = (
+            RandomSearchTag.select(RandomSearchTag.chat_id)
+            .where(~RandomSearchTag.is_suspended)
+            .distinct()
+        )
+        return [row.chat_id for row in query]
     except Exception as e:
         logger.error(f"获取随机搜索群聊列表失败: {e}")
         return []
@@ -388,8 +416,7 @@ def suspend_random_search(chat_id: str) -> (bool, str):
         if updated_rows > 0:
             logger.info(f"群聊 {chat_id} 的随机搜索已暂停。")
             return True, "已暂停当前群聊的随机搜索功能。"
-        else:
-            return False, "当前群聊没有配置随机搜索标签。"
+        return False, "当前群聊没有配置随机搜索标签。"
     except Exception as e:
         logger.error(f"暂停随机搜索失败: {e}")
         return False, f"暂停失败: {e}"
@@ -405,8 +432,7 @@ def resume_random_search(chat_id: str) -> (bool, str):
         if updated_rows > 0:
             logger.info(f"群聊 {chat_id} 的随机搜索已恢复。")
             return True, "已恢复当前群聊的随机搜索功能。"
-        else:
-            return False, "当前群聊没有配置随机搜索标签。"
+        return False, "当前群聊没有配置随机搜索标签。"
     except Exception as e:
         logger.error(f"恢复随机搜索失败: {e}")
         return False, f"恢复失败: {e}"
@@ -444,6 +470,45 @@ def add_sent_illust(illust_id: int, chat_id: str):
         logger.error(f"添加已发送作品记录失败: {e}")
 
 
+def add_sent_illusts(illust_ids, chat_id: str) -> int:
+    """批量记录已发送的作品，避免 N 条记录 = N 次写事务。
+
+    Args:
+        illust_ids: 作品 ID 可迭代对象
+        chat_id: 群聊/会话 ID
+
+    Returns:
+        int: 实际尝试写入的记录条数
+    """
+    normalized_ids = []
+    seen = set()
+    for illust_id in illust_ids or []:
+        try:
+            value = int(illust_id)
+        except (TypeError, ValueError):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        normalized_ids.append(value)
+
+    if not normalized_ids or not chat_id:
+        return 0
+
+    now = datetime.now()
+    rows = [
+        {"illust_id": illust_id, "chat_id": chat_id, "sent_at": now}
+        for illust_id in normalized_ids
+    ]
+    try:
+        with db.atomic():
+            SentIllust.insert_many(rows).on_conflict_ignore().execute()
+        return len(rows)
+    except Exception as e:
+        logger.error(f"批量添加已发送作品记录失败: {e}")
+        return 0
+
+
 def is_illust_sent(illust_id: int, chat_id: str) -> bool:
     """检查作品是否已发送过"""
     try:
@@ -475,12 +540,12 @@ def filter_sent_illusts(illusts, chat_id: str) -> list:
     """过滤掉已发送的作品"""
     try:
         # 获取所有已发送的作品ID
-        sent_ids = set(
+        sent_ids = {
             record.illust_id
             for record in SentIllust.select(SentIllust.illust_id).where(
                 SentIllust.chat_id == chat_id
             )
-        )
+        }
 
         # 过滤掉已发送的作品
         filtered_illusts = []
@@ -510,17 +575,12 @@ def add_recent_sent_illusts(illust_ids, scope_id: str) -> None:
 
     try:
         now = datetime.now()
+        rows = [
+            {"illust_id": illust_id, "scope_id": scope_id, "sent_at": now}
+            for illust_id in sorted(normalized_ids)
+        ]
         with db.atomic():
-            for illust_id in normalized_ids:
-                (
-                    RecentSentIllust.insert(
-                        illust_id=illust_id,
-                        scope_id=scope_id,
-                        sent_at=now,
-                    )
-                    .on_conflict_replace()
-                    .execute()
-                )
+            RecentSentIllust.insert_many(rows).on_conflict_replace().execute()
     except Exception as e:
         logger.error(f"添加近期 Pixiv 发送记录失败: {e}")
 
@@ -669,7 +729,7 @@ def get_all_schedule_times() -> dict:
 
 # 随机排行榜相关函数
 def add_random_ranking(
-    chat_id: str, session_id: str, mode: str, date: str = None
+    chat_id: str, session_id: str, mode: str, date: str | None = None
 ) -> (bool, str):
     """添加随机排行榜配置"""
     try:
@@ -696,8 +756,7 @@ def remove_random_ranking(chat_id: str, index: int) -> (bool, str):
             mode = config.mode
             config.delete_instance()
             return True, f"成功删除排行榜: {mode}"
-        else:
-            return False, "无效的序号。"
+        return False, "无效的序号。"
     except Exception as e:
         logger.error(f"删除随机排行榜失败: {e}")
         return False, f"删除失败: {e}"
@@ -720,22 +779,13 @@ def get_random_rankings(chat_id: str) -> list:
 def get_all_random_ranking_groups() -> list:
     """获取所有启用了随机排行榜的群聊ID"""
     try:
-        all_groups_query = RandomRankingConfig.select(
-            RandomRankingConfig.chat_id
-        ).distinct()
-        all_groups = [row.chat_id for row in all_groups_query]
-
-        active_groups = []
-        for chat_id in all_groups:
-            configs = list(
-                RandomRankingConfig.select().where(
-                    RandomRankingConfig.chat_id == chat_id
-                )
-            )
-            if configs and any(not c.is_suspended for c in configs):
-                active_groups.append(chat_id)
-
-        return active_groups
+        # 同 get_all_random_search_groups：单条 distinct 查询替代 N+1
+        query = (
+            RandomRankingConfig.select(RandomRankingConfig.chat_id)
+            .where(~RandomRankingConfig.is_suspended)
+            .distinct()
+        )
+        return [row.chat_id for row in query]
     except Exception as e:
         logger.error(f"获取随机排行榜群聊列表失败: {e}")
         return []
@@ -750,3 +800,34 @@ def list_random_rankings(chat_id: str) -> list:
     except Exception as e:
         logger.error(f"列出随机排行榜配置失败: {e}")
         return []
+
+
+# 需要自行管理连接生命周期（或纯逻辑）的函数，不套连接上下文
+_DB_CONNECTION_EXEMPT = {
+    "initialize_database",
+}
+
+
+def _wrap_module_db_functions() -> None:
+    """给本模块所有公开数据库函数统一套上 _with_db 连接上下文。
+
+    这些函数都会在 asyncio.to_thread 的线程池里被调用，peewee 默认会隐式建连
+    但从不归还；不显式包裹连接上下文时，线程池连接会一直累积并在并发写时
+    触发 "database is locked"。
+    """
+    module = sys.modules[__name__]
+    for name, obj in list(vars(module).items()):
+        if name.startswith("_") or name in _DB_CONNECTION_EXEMPT:
+            continue
+        if not inspect.isfunction(obj):
+            continue
+        if obj.__module__ != __name__:
+            continue
+        if getattr(obj, "_alice_db_wrapped", False):
+            continue
+        wrapped = _with_db(obj)
+        wrapped._alice_db_wrapped = True  # type: ignore[attr-defined]
+        setattr(module, name, wrapped)
+
+
+_wrap_module_db_functions()

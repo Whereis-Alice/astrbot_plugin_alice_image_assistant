@@ -1,19 +1,40 @@
-# -*- coding: utf-8 -*-
-import io
-import math
-import asyncio
-import aiohttp
-import socket
-import ipaddress
-from urllib.parse import urlparse
-from typing import Optional, List, Tuple
+"""搜图神器候选图的下载与九宫格拼图工具。
 
+拼图上的编号是 VLM 选图的唯一定位依据，因此编号绘制与图片顺序必须保持稳定；
+下载/解码失败不再静默丢弃，而是记录日志，便于排查"候选池被莫名削减导致选不中"的问题。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import ipaddress
+import math
+import socket
+from urllib.parse import urlparse
+
+import aiohttp
+from astrbot.api import logger
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 TILE_SIZE = 300
 MAX_IMAGE_SIZE = 15 * 1024 * 1024
 
 _FONT_CACHE = None
+
+# 下载失败可能成批出现，仅首条升级为 warning，其余降级 debug，避免日志被刷爆又不至于完全静默。
+_DOWNLOAD_WARNED = False
+
+
+def _log_download_failure(url: str, reason: str) -> None:
+    """记录候选图下载失败原因（首条 warning，后续 debug）。"""
+    global _DOWNLOAD_WARNED
+    message = f"[AliceImageSoutu] 候选图下载失败，已跳过：{url} 原因：{reason}"
+    if _DOWNLOAD_WARNED:
+        logger.debug(message)
+    else:
+        _DOWNLOAD_WARNED = True
+        logger.warning(message)
 
 
 class SSRFInterceptError(Exception):
@@ -37,7 +58,8 @@ class SafeResolver(aiohttp.DefaultResolver):
                 ):
                     raise SSRFInterceptError("检测到受限网络地址。")
             except ValueError:
-                pass
+                # 不是纯 IP（例如 DNS 返回了主机名形态）时无法做私网判定，记录后按放行处理。
+                logger.debug(f"[AliceImageSoutu] 无法解析为 IP 地址，跳过私网校验：{ip_str}")
         return resolved
 
 
@@ -58,28 +80,30 @@ def is_safe_url_host(url: str) -> bool:
             ):
                 return False
         except ValueError:
-            pass
+            # host 是域名而非 IP，交给 SafeResolver 在真正连接时再做私网拦截。
+            logger.debug(f"[AliceImageSoutu] URL 主机名不是 IP，延后校验：{host}")
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[AliceImageSoutu] URL 安全校验异常，按不安全处理：{url} 原因：{exc}")
         return False
 
 
-def _get_large_font():
+def _get_large_font() -> ImageFont.ImageFont:
     global _FONT_CACHE
     if _FONT_CACHE is None:
         try:
             _FONT_CACHE = ImageFont.truetype("arial.ttf", 36)
-        except IOError:
+        except OSError:
             try:
                 _FONT_CACHE = ImageFont.truetype("DejaVuSans.ttf", 36)
-            except IOError:
+            except OSError:
                 _FONT_CACHE = ImageFont.load_default()
     return _FONT_CACHE
 
 
 def _create_collage_sync(
-    items: List[Tuple[str, bytes]],
-) -> Tuple[Optional[bytes], List[Tuple[str, bytes]]]:
+    items: list[tuple[str, bytes]],
+) -> tuple[bytes | None, list[tuple[str, bytes]]]:
     successful_images, valid_items = [], []
     for url, img_bytes in items:
         try:
@@ -91,7 +115,9 @@ def _create_collage_sync(
                 )
                 successful_images.append(converted_img)
                 valid_items.append((url, img_bytes))
-        except Exception:
+        except Exception as exc:
+            # 坏图会让编号与候选错位，必须记录下来才能定位"编号对不上"的选图偏差。
+            logger.debug(f"[AliceImageSoutu] 拼图跳过无法解码的候选图：{url} 原因：{exc}")
             continue
 
     if not successful_images:
@@ -129,12 +155,14 @@ def _create_collage_sync(
 
 
 class ComposerManager:
-    def __init__(self):
-        self._session = None
-        self._semaphore = None
-        self._lock = None
+    """管理候选图下载会话与九宫格拼图。"""
 
-    def _ensure_primitives(self):
+    def __init__(self) -> None:
+        self._session: aiohttp.ClientSession | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._lock: asyncio.Lock | None = None
+
+    def _ensure_primitives(self) -> None:
         if self._lock is None:
             self._lock = asyncio.Lock()
         if self._semaphore is None:
@@ -148,7 +176,7 @@ class ComposerManager:
                 self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
-    async def close_all(self):
+    async def close_all(self) -> None:
         self._ensure_primitives()
         async with self._lock:
             if self._session and not self._session.closed:
@@ -156,8 +184,9 @@ class ComposerManager:
                 self._session = None
             self._semaphore = None
 
-    async def _download_image(self, url: str) -> Tuple[str, Optional[bytes]]:
+    async def _download_image(self, url: str) -> tuple[str, bytes | None]:
         if not is_safe_url_host(url):
+            _log_download_failure(url, "主机名未通过安全校验")
             return url, None
 
         self._ensure_primitives()
@@ -195,27 +224,33 @@ class ComposerManager:
                     url, headers=headers, timeout=req_timeout, allow_redirects=False
                 ) as resp:
                     if resp.status != 200:
+                        _log_download_failure(url, f"HTTP {resp.status}")
                         return url, None
                     content_type = resp.headers.get("Content-Type", "").lower()
 
                     if not content_type.startswith("image/"):
+                        _log_download_failure(url, f"Content-Type 非图片：{content_type}")
                         return url, None
 
-                    chunks = []
+                    chunks: list[bytes] = []
                     downloaded_size = 0
                     async for chunk in resp.content.iter_chunked(1024 * 1024):
                         downloaded_size += len(chunk)
                         if downloaded_size > MAX_IMAGE_SIZE:
+                            _log_download_failure(url, "图片体积超过上限")
                             return url, None
                         chunks.append(chunk)
                     return url, b"".join(chunks)
-            except Exception:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _log_download_failure(url, str(exc) or type(exc).__name__)
                 return url, None
 
     async def download_image_batch(
-        self, urls: List[str], target_count: int = 9
-    ) -> List[Tuple[str, bytes]]:
-        valid_items = []
+        self, urls: list[str], target_count: int = 9
+    ) -> list[tuple[str, bytes]]:
+        valid_items: list[tuple[str, bytes]] = []
         pending_tasks = [asyncio.create_task(self._download_image(url)) for url in urls]
 
         try:
@@ -232,7 +267,8 @@ class ComposerManager:
                         valid_items.append((url, res))
                 except asyncio.CancelledError:
                     break
-                except Exception:
+                except Exception as exc:
+                    logger.debug(f"[AliceImageSoutu] 批量下载单任务异常，已跳过：{exc}")
                     continue
         finally:
             if pending_tasks:
@@ -242,9 +278,9 @@ class ComposerManager:
         valid_items.sort(key=lambda item: input_order.get(item[0], len(urls)))
         return valid_items
 
-    # 🚀 补回遗失的救命方法，供 main.py 异步调用
     async def create_collage_from_items(
-        self, items: List[Tuple[str, bytes]]
-    ) -> Tuple[Optional[bytes], List[Tuple[str, bytes]]]:
+        self, items: list[tuple[str, bytes]]
+    ) -> tuple[bytes | None, list[tuple[str, bytes]]]:
+        """把候选图拼成带编号的九宫格，返回拼图与实际参与拼图的候选（保持编号一致）。"""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _create_collage_sync, items)

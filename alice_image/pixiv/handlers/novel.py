@@ -1,20 +1,22 @@
-from pathlib import Path
-from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent
-from ..utils.pixiv_utils import send_pixiv_image, send_forward_message
-from ..utils.help import get_help_message
-from ..utils.tag import (
-    build_detail_message,
-    FilterConfig,
-    validate_and_process_tags,
-    process_and_send_illusts,
-)
 import asyncio
-import io
 import base64
 import hashlib
+import io
+from pathlib import Path
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import File
 from fpdf import FPDF
+
+from ..utils.help import get_help_message
+from ..utils.pixiv_utils import send_forward_message, send_pixiv_image
+from ..utils.tag import (
+    FilterConfig,
+    build_detail_message,
+    process_and_send_illusts,
+    validate_and_process_tags,
+)
 
 
 class NovelHandler:
@@ -104,7 +106,7 @@ class NovelHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：搜索小说时发生错误 - {e}")
-            yield event.plain_result(f"搜索小说时发生错误: {str(e)}")
+            yield event.plain_result(f"搜索小说时发生错误: {e!s}")
 
     async def pixiv_novel_recommended(self, event: AstrMessageEvent):
         """获取 Pixiv 推荐小说"""
@@ -159,7 +161,7 @@ class NovelHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取推荐小说时发生错误 - {e}")
-            yield event.plain_result(f"获取推荐小说时发生错误: {str(e)}")
+            yield event.plain_result(f"获取推荐小说时发生错误: {e!s}")
 
     async def pixiv_novel_new(self, event: AstrMessageEvent, max_novel_id: str = ""):
         """获取大家的新小说"""
@@ -234,7 +236,7 @@ class NovelHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取新小说时发生错误 - {e}")
-            yield event.plain_result(f"获取新小说时发生错误: {str(e)}")
+            yield event.plain_result(f"获取新小说时发生错误: {e!s}")
 
     async def pixiv_novel_series(self, event: AstrMessageEvent, series_id: str = ""):
         """获取小说系列详情"""
@@ -292,7 +294,7 @@ class NovelHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取小说系列详情时发生错误 - {e}")
-            yield event.plain_result(f"获取小说系列详情时发生错误: {str(e)}")
+            yield event.plain_result(f"获取小说系列详情时发生错误: {e!s}")
 
     async def pixiv_novel_comments(
         self, event: AstrMessageEvent, novel_id: str = "", offset: str = ""
@@ -482,7 +484,7 @@ class NovelHandler:
             import traceback
 
             logger.error(traceback.format_exc())
-            yield event.plain_result(f"获取小说评论时发生错误: {str(e)}")
+            yield event.plain_result(f"获取小说评论时发生错误: {e!s}")
 
     async def pixiv_novel_download(self, event: AstrMessageEvent, novel_id: str = ""):
         """根据ID下载Pixiv小说为pdf文件"""
@@ -610,7 +612,7 @@ class NovelHandler:
             )
         except Exception as e:
             logger.error(f"Pixiv 插件：下载或转换小说为PDF时发生错误 - {e}")
-            yield event.plain_result(f"处理小说时发生错误: {str(e)}")
+            yield event.plain_result(f"处理小说时发生错误: {e!s}")
 
     def create_pdf_from_text(self, title: str, text: str) -> bytes:
         """使用 fpdf2 将文本转换为 PDF 字节流"""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+
 from astrbot.api import logger
 from astrbot.api.provider import Provider
 
@@ -95,13 +96,20 @@ async def run_tournament(
     vlm_provider: Provider,
     http: HttpService,
     batch_size: int = 16,
+    finalists_out: list[str] | None = None,
+    max_concurrent_batches: int = _MAX_CONCURRENT_BATCHES,
 ) -> str | None:
     """淘汰赛式筛选：分批拼图 → VLM 选优 → 反复直到剩 1 张。
 
     包含决赛圈（候选 ≤ 一批时只取一半）与僵局（连续无淘汰则强化提示，再不行随机定胜）逻辑。
+
+    finalists_out 会被写入「冠军所在的最后一轮候选直链」，供调用方在冠军被终选复核
+    否决后依序换用次优候选——否则一次误判就只能整源放弃，白丢可用图。
     """
     current_winners = image_urls
     if len(current_winners) == 1:
+        if finalists_out is not None:
+            finalists_out[:] = list(current_winners)
         winners = await _process_batch(
             current_winners,
             query,
@@ -123,6 +131,9 @@ async def run_tournament(
             f"分 {num_batches} 批（每批最多 {batch_size} 张）"
         )
         next_round_winners: list[str] = []
+        # 每轮刷新决赛圈快照，循环结束时它即为冠军所在的最后一轮候选集合。
+        if finalists_out is not None:
+            finalists_out[:] = list(current_winners)
 
         effective_prompt = query
         enhancements: list[str] = []
@@ -143,7 +154,7 @@ async def run_tournament(
             effective_prompt = f"{query}\n\n{' '.join(enhancements)}"
 
         # 同一轮内各批次相互独立，并发处理（下载 + VLM）以避免串行累积超时
-        sem = asyncio.Semaphore(_MAX_CONCURRENT_BATCHES)
+        sem = asyncio.Semaphore(max(1, int(max_concurrent_batches)))
         batches = [
             current_winners[i : i + batch_size]
             for i in range(0, len(current_winners), batch_size)

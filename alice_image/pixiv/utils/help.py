@@ -6,9 +6,8 @@ help.py
 import json
 import re
 from pathlib import Path
-from typing import Dict, Optional
-from astrbot.api import logger
 
+from astrbot.api import logger
 
 _PUBLIC_COMMAND_NAMES = {
     "/pixiv": "/aaP",
@@ -51,7 +50,11 @@ _PUBLIC_COMMAND_NAMES = {
     "/pixiv_trending_tags": "/aaP趋势",
     "/pixiv_user_detail": "/aaP画师详",
     "/pixiv_user_illusts": "/aaP画师作",
+    "/pixiv_user_random": "/aaP画师随",
     "/pixiv_user_search": "/aaP画师",
+    # /aaP画师找 是本插件自有的复合命令（正向搜索入口），上游没有同名命令；
+    # 这里补一条映射，保证帮助文案里出现 /pixiv_artist_find 时也能被正确替换。
+    "/pixiv_artist_find": "/aaP画师找",
 }
 _UPSTREAM_COMMAND_PATTERN = re.compile(r"/pixiv(?:_[a-z_]+)?(?![a-zA-Z0-9_])")
 
@@ -76,14 +79,14 @@ class HelpManager:
         self.data_dir = data_dir
         # 使用插件目录下的帮助文件
         self.help_file = Path(__file__).parent.parent / "data" / "helpmsg.json"
-        self._help_messages: Dict[str, str] = {}
+        self._help_messages: dict[str, str] = {}
         self._load_help_messages()
 
     def _load_help_messages(self):
         """加载帮助消息"""
         try:
             if self.help_file.exists():
-                with open(self.help_file, "r", encoding="utf-8") as f:
+                with self.help_file.open(encoding="utf-8") as f:
                     self._help_messages = json.load(f)
                 logger.info(f"Pixiv 插件：成功加载帮助消息文件 {self.help_file}")
             else:
@@ -93,7 +96,7 @@ class HelpManager:
             logger.error(f"Pixiv 插件：加载帮助消息文件失败 - {e}")
             self._help_messages = {}
 
-    def get_help_message(self, key: str, default: Optional[str] = None) -> str:
+    def get_help_message(self, key: str, default: str | None = None) -> str:
         """获取帮助消息
 
         Args:
@@ -105,9 +108,8 @@ class HelpManager:
         """
         if key in self._help_messages:
             return replace_public_command_names(self._help_messages[key])
-        else:
-            logger.warning(f"Pixiv 插件：未找到帮助消息键: {key}")
-            return default or f"帮助消息 '{key}' 未找到"
+        logger.warning(f"Pixiv 插件：未找到帮助消息键: {key}")
+        return default or f"帮助消息 '{key}' 未找到"
 
     def reload_help_messages(self):
         """重新加载帮助消息"""
@@ -115,7 +117,7 @@ class HelpManager:
 
 
 # 全局帮助管理器实例
-_help_manager: Optional[HelpManager] = None
+_help_manager: HelpManager | None = None
 
 
 def init_help_manager(data_dir: Path):
@@ -128,7 +130,7 @@ def init_help_manager(data_dir: Path):
     _help_manager = HelpManager(data_dir)
 
 
-def get_help_message(key: str, default: Optional[str] = None) -> str:
+def get_help_message(key: str, default: str | None = None) -> str:
     """获取帮助消息
 
     Args:

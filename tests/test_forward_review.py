@@ -12,11 +12,11 @@ from astrbot_plugin_alice_image_assistant.alice_image.forward.serpapi.vlm import
     VlmReviewError,
     select_from_collage,
 )
-from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.service import (
-    SoutuSearchService,
-)
 from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.composer import (
     ComposerManager,
+)
+from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.service import (
+    SoutuSearchService,
 )
 from astrbot_plugin_alice_image_assistant.alice_image.forward.soutu.vlm import (
     select_best_image_index,
@@ -301,9 +301,8 @@ class VlmParsingTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "astrbot_plugin_alice_image_assistant.alice_image.forward.serpapi.vlm.asyncio.sleep",
             AsyncMock(),
-        ):
-            with self.assertRaises(VlmReviewError):
-                await select_from_collage(b"image", "海狸", 2, provider, 1)
+        ), self.assertRaises(VlmReviewError):
+            await select_from_collage(b"image", "海狸", 2, provider, 1)
 
     async def test_nonempty_invalid_indices_are_review_errors(self) -> None:
         for response_text in (
@@ -317,12 +316,14 @@ class VlmParsingTests(unittest.IsolatedAsyncioTestCase):
                         return_value=SimpleNamespace(completion_text=response_text)
                     )
                 )
-                with patch(
-                    "astrbot_plugin_alice_image_assistant.alice_image.forward.serpapi.vlm.asyncio.sleep",
-                    AsyncMock(),
+                with (
+                    patch(
+                        "astrbot_plugin_alice_image_assistant.alice_image.forward.serpapi.vlm.asyncio.sleep",
+                        AsyncMock(),
+                    ),
+                    self.assertRaises(VlmReviewError),
                 ):
-                    with self.assertRaises(VlmReviewError):
-                        await select_from_collage(b"image", "海狸", 2, provider, 1)
+                    await select_from_collage(b"image", "海狸", 2, provider, 1)
 
 
 if __name__ == "__main__":

@@ -9,15 +9,59 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+import time
 import urllib.parse
 
 from astrbot.api import logger
 from curl_cffi.requests import AsyncSession
 
-from .constant import ASCII2D_BASE_URL, ASCII2D_SEARCH_URI_URL, HTTP_TIMEOUT_SECONDS
+from .constant import (
+    ASCII2D_BASE_URL,
+    ASCII2D_SEARCH_URI_URL,
+    ASCII2D_TOKEN_TTL_SECONDS,
+    DEFAULT_ASCII2D_MAX_RESULTS,
+    HTTP_TIMEOUT_SECONDS,
+    IMAGE_DOWNLOAD_TIMEOUT,
+    SOURCE_KEY_ASCII2D_BOVW,
+    SOURCE_KEY_ASCII2D_COLOR,
+)
 from .models import SearchResultItem
+from .ranking import dedupe_by_url, positional_score
 from .strategy import ImageSearchStrategy
-from .utils import download_bytes, get_proxy_url
+from .utils import coerce_int, get_proxy_url
+
+# item-box 块：从 <div class='row item-box'> 到紧随其后的 clearfix
+ITEM_BOX_PATTERN = re.compile(
+    r"<div\s+class=['\"]row\s+item-box['\"][^>]*>"
+    r".*?<div\s+class=['\"]clearfix['\"]></div>",
+    re.DOTALL,
+)
+
+# detail-box 块：一个 item-box 内可能有多个 detail-box (同一张图的多个来源)
+DETAIL_BOX_PATTERN = re.compile(
+    r"<div[^>]+class=['\"][^'\"]*detail-box[^'\"]*['\"][^>]*>(.*?)</div>",
+    re.DOTALL,
+)
+
+# detail-box 内 h6 里的锚点：(href, 文本)
+H6_ANCHOR_PATTERN = re.compile(
+    r"<h6[^>]*>(.*?)</h6>",
+    re.DOTALL,
+)
+ANCHOR_PATTERN = re.compile(
+    r"<a[^>]+href=['\"]([^'\"]+)['\"][^>]*>(.*?)</a>",
+    re.DOTALL,
+)
+SMALL_ANCHOR_PATTERN = re.compile(
+    r"<small[^>]*>.*?<a[^>]+href=['\"]([^'\"]+)['\"][^>]*>(.*?)</a>",
+    re.DOTALL,
+)
+
+# 缩略图 <img src=...>
+IMG_SRC_PATTERN = re.compile(r"<img[^>]+src=['\"]([^'\"]+)['\"]")
+
+# 去标签，取锚点纯文本
+TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
 class Ascii2dStrategy(ImageSearchStrategy):
@@ -31,19 +75,30 @@ class Ascii2dStrategy(ImageSearchStrategy):
     IMPERSONATE_BROWSER = "chrome120"
 
     def __init__(
-        self, session_id: str | None = None, cf_clearance: str | None = None
+        self,
+        session_id: str | None = None,
+        cf_clearance: str | None = None,
+        max_results: int = DEFAULT_ASCII2D_MAX_RESULTS,
     ) -> None:
         """初始化 Ascii2d 策略.
 
         Args:
             session_id: Ascii2d 网站的 _session_id Cookie 值
             cf_clearance: Cloudflare cf_clearance Cookie 值，用于绕过 CF 验证
+            max_results: 单次搜索返回条数 (bovw + color 去重后)
         """
         self.session_id = session_id or ""
         self.cf_clearance = cf_clearance or ""
+        # WebUI 传来的数值可能是字符串，先强制转换再夹取，避免初始化期崩溃
+        self.max_results = coerce_int(max_results, DEFAULT_ASCII2D_MAX_RESULTS, 1, 20)
         # 共享的 curl_cffi AsyncSession，避免重复创建连接
         self._session: AsyncSession | None = None
         self._session_lock = asyncio.Lock()
+        # authenticity_token 缓存 (值, 获取时间)
+        # 每次搜图都先请求一次主页会白白多一个 RTT，token 在有效期内可以复用
+        self._token: str | None = None
+        self._token_ts: float = 0.0
+        self._token_lock = asyncio.Lock()
 
     async def _get_session(self) -> AsyncSession:
         """获取共享的 AsyncSession 实例.
@@ -73,6 +128,9 @@ class Ascii2dStrategy(ImageSearchStrategy):
                 await self._session.close()
                 self._session = None
                 logger.debug("[Ascii2d] AsyncSession 已关闭")
+        # token 与会话绑定 (依赖同一批 Cookie)，会话关闭后必须一起失效
+        self._token = None
+        self._token_ts = 0.0
 
     def _get_cookies(self) -> dict:
         """获取 Cookie 字典.
@@ -115,7 +173,7 @@ class Ascii2dStrategy(ImageSearchStrategy):
             return []
 
         try:
-            # 步骤 1: 获取 authenticity_token
+            # 步骤 1: 获取 authenticity_token (命中缓存时不再请求主页)
             token = await self._fetch_authenticity_token()
             if not token:
                 logger.error("[Ascii2d] 获取 token 失败")
@@ -123,6 +181,12 @@ class Ascii2dStrategy(ImageSearchStrategy):
 
             # 步骤 2: 提交搜索请求，获取结果页 URL
             result_url = await self._post_url_search(image_url, token)
+            if not result_url:
+                # 缓存的 token 可能已过期，强制刷新后再试一次
+                token = await self._fetch_authenticity_token(force_refresh=True)
+                result_url = (
+                    await self._post_url_search(image_url, token) if token else None
+                )
             if not result_url:
                 logger.error("[Ascii2d] 搜索请求失败")
                 return []
@@ -133,41 +197,10 @@ class Ascii2dStrategy(ImageSearchStrategy):
                 self._fetch_and_parse_result_page(result_url, is_bovw=True),
             )
 
-            # 合并结果：优先 bovw，再 color
-            combined = []
-            # bovw 取前 3 条
-            combined.extend(bovw_results[:3])
-            # color 取前 2 条
-            combined.extend(color_results[:2])
-
-            # 下载缩略图
-            thumbnail_urls = [item.thumbnail for item in combined if item.thumbnail]
-            thumbnail_bytes_list = await asyncio.gather(
-                *[download_bytes(url) for url in thumbnail_urls],
-                return_exceptions=False,
-            )
-
-            # 回填缩略图字节
-            final_results = []
-            thumbnail_idx = 0
-            for item in combined:
-                thumbnail_bytes = None
-                if item.thumbnail and thumbnail_idx < len(thumbnail_bytes_list):
-                    thumbnail_bytes = thumbnail_bytes_list[thumbnail_idx]
-                    thumbnail_idx += 1
-
-                final_results.append(
-                    SearchResultItem(
-                        title=item.title,
-                        url=item.url,
-                        thumbnail=item.thumbnail,
-                        thumbnail_bytes=thumbnail_bytes,
-                        source="Ascii2d",
-                        similarity=None,
-                        description=None,
-                        domain=None,
-                    )
-                )
+            # 合并结果：bovw (特征匹配) 比 color (配色匹配) 可信，放在前面；
+            # 两种模式的命中高度重叠，必须按规范化 URL 去重，否则展示位被重复项吃光。
+            combined = dedupe_by_url([*bovw_results, *color_results])
+            final_results = combined[: self.max_results]
 
             logger.info(f"[Ascii2d] 搜索完成，获取 {len(final_results)} 条结果")
             return final_results
@@ -176,8 +209,79 @@ class Ascii2dStrategy(ImageSearchStrategy):
             logger.error(f"[Ascii2d] 搜索异常: {e}")
             return []
 
-    async def _fetch_authenticity_token(self) -> str | None:
-        """从 Ascii2d 主页获取 authenticity_token.
+    async def fetch_thumbnail(self, url: str) -> bytes | None:
+        """下载 Ascii2d 缩略图.
+
+        ascii2d 的缩略图同样受 Cloudflare 保护，用裸 aiohttp (无 TLS 指纹、
+        无 Cookie、无 Referer) 很容易吃 403，因此复用本策略的 curl_cffi 会话。
+
+        Args:
+            url: 缩略图 URL
+
+        Returns:
+            图片字节数据，失败返回 None
+        """
+        if not url or not url.startswith(("http://", "https://")):
+            return None
+
+        try:
+            session = await self._get_session()
+            response = await session.get(
+                url,
+                cookies=self._get_cookies(),
+                headers={"Referer": f"{ASCII2D_BASE_URL}/"},
+                timeout=IMAGE_DOWNLOAD_TIMEOUT,
+            )
+            if response.status_code != 200:
+                logger.debug(
+                    f"[Ascii2d] 缩略图下载失败: HTTP {response.status_code}"
+                )
+                return None
+            return response.content
+        except Exception as e:
+            logger.debug(f"[Ascii2d] 缩略图下载异常: {e}")
+            return None
+
+    async def _fetch_authenticity_token(
+        self, force_refresh: bool = False
+    ) -> str | None:
+        """获取 authenticity_token (带 TTL 缓存).
+
+        Args:
+            force_refresh: True 表示忽略缓存强制重新抓取
+
+        Returns:
+            token 字符串，失败返回 None
+        """
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._token
+            and now - self._token_ts < ASCII2D_TOKEN_TTL_SECONDS
+        ):
+            return self._token
+
+        async with self._token_lock:
+            # 双重检查：并发搜图时只让第一个请求真正去抓主页
+            now = time.monotonic()
+            if (
+                not force_refresh
+                and self._token
+                and now - self._token_ts < ASCII2D_TOKEN_TTL_SECONDS
+            ):
+                return self._token
+
+            token = await self._request_authenticity_token()
+            if token:
+                self._token = token
+                self._token_ts = time.monotonic()
+            else:
+                self._token = None
+                self._token_ts = 0.0
+            return token
+
+    async def _request_authenticity_token(self) -> str | None:
+        """从 Ascii2d 主页抓取 authenticity_token.
 
         Returns:
             token 字符串，失败返回 None
@@ -269,8 +373,10 @@ class Ascii2dStrategy(ImageSearchStrategy):
                 if "/search/color/" in final_url or "/search/bovw/" in final_url:
                     logger.info(f"[Ascii2d] 搜索成功，结果页: {final_url}")
                     return final_url
-                logger.warning(f"[Ascii2d] 重定向到非预期 URL: {final_url}")
-                return final_url
+                # 落在非结果页 (如被打回首页) 时返回该 URL，后续 color/bovw 两路会
+                # 抓同一个页面并产出完全重复的结果，因此直接判定为失败。
+                logger.warning(f"[Ascii2d] 重定向到非结果页，已放弃: {final_url}")
+                return None
 
             logger.warning(f"[Ascii2d] POST 失败: HTTP {response.status_code}")
             logger.debug(
@@ -335,82 +441,132 @@ class Ascii2dStrategy(ImageSearchStrategy):
             logger.error(f"[Ascii2d] 获取结果页异常: {e}")
             return []
 
-        return self._parse_ascii2d_html(html)
+        source_key = SOURCE_KEY_ASCII2D_BOVW if is_bovw else SOURCE_KEY_ASCII2D_COLOR
+        return self._parse_ascii2d_html(html, source_key)
 
-    @staticmethod
-    def _parse_ascii2d_html(html: str) -> list[SearchResultItem]:
+    @classmethod
+    def _parse_ascii2d_html(
+        cls, html: str, source_key: str = SOURCE_KEY_ASCII2D_BOVW
+    ) -> list[SearchResultItem]:
         """解析 Ascii2d HTML 结果页.
 
         Args:
             html: HTML 内容
+            source_key: 归一化来源键 (ascii2d/bovw 或 ascii2d/color)
 
         Returns:
             解析后的结果列表
         """
-        results = []
+        parsed: list[tuple[str, str, str]] = []
 
-        # 匹配 item-box 块 (从 <div class='row item-box'> 到 <div class='clearfix'></div>)
-        # HTML 使用单引号，需要同时支持单引号和双引号
-        item_boxes = re.findall(
-            r"<div\s+class=['\"]row\s+item-box['\"][^>]*>.*?<div\s+class=['\"]clearfix['\"]></div>",
-            html,
-            re.DOTALL,
-        )
-
-        # 跳过第一个（通常是搜索原图）
-        for box in item_boxes[1:]:
+        for box in ITEM_BOX_PATTERN.findall(html):
             try:
-                # 提取缩略图 (支持单引号和双引号)
-                thumbnail_match = re.search(r"<img[^>]+src=['\"]([^'\"]+)['\"]", box)
-                thumbnail = ""
-                if thumbnail_match:
-                    thumb_src = thumbnail_match.group(1)
-                    if not thumb_src.startswith("http"):
-                        thumbnail = f"{ASCII2D_BASE_URL}{thumb_src}"
-                    else:
-                        thumbnail = thumb_src
-
-                # 提取标题和链接 (在 h6 内的 a 标签中，支持单引号和双引号)
-                # 结构: <h6>...<a href="...">标题</a>...
-                title_match = re.search(
-                    r"<h6[^>]*>.*?<a[^>]+href=['\"]([^'\"]+)['\"][^>]*>([^<]+)</a>",
-                    box,
-                    re.DOTALL,
-                )
-                if not title_match:
-                    continue
-
-                url = title_match.group(1)
-                title = title_match.group(2).strip()
-
-                # 尝试解码 URL
-                with contextlib.suppress(Exception):
-                    url = urllib.parse.unquote(url)
-
-                # 如果链接是相对路径，尝试提取其他外部链接
-                if url.startswith("/"):
-                    # 尝试找 detail-box 内的其他链接
-                    external_match = re.search(
-                        r"<small[^>]*><a[^>]+href=['\"]([^'\"]+)['\"]",
-                        box,
-                    )
-                    if external_match:
-                        url = external_match.group(1)
-
-                if not url.startswith("http"):
-                    continue
-
-                results.append(
-                    SearchResultItem(
-                        title=title,
-                        url=url,
-                        thumbnail=thumbnail,
-                        thumbnail_bytes=None,
-                        source="Ascii2d",
-                    )
-                )
-
+                triple = cls._parse_item_box(box)
             except Exception as e:
                 logger.debug(f"[Ascii2d] 解析单个 item 失败: {e}")
+                continue
+            # triple 为 None 表示这个 box 里没有任何外站链接。
+            # 查询原图块正是这种"只有自站链接/没有链接"的块，按内容特征识别比
+            # 无条件丢弃第一个 box 更稳：正则漏匹配时不会把最相关的首条命中丢掉。
+            if triple is not None:
+                parsed.append(triple)
 
+        total = len(parsed)
+        results: list[SearchResultItem] = []
+        for index, (title, url, thumbnail) in enumerate(parsed):
+            results.append(
+                SearchResultItem(
+                    title=title,
+                    url=url,
+                    thumbnail=thumbnail,
+                    thumbnail_bytes=None,
+                    source="Ascii2d",
+                    similarity=None,
+                    description=None,
+                    domain=None,
+                    # ascii2d 不给相似度，用位次 + 模式可信度折算成可跨引擎比较的分数
+                    score=positional_score(index, total, source_key),
+                    source_key=source_key,
+                )
+            )
         return results
+
+    @classmethod
+    def _parse_item_box(cls, box: str) -> tuple[str, str, str] | None:
+        """解析单个 item-box，返回 (标题, 链接, 缩略图) 三元组.
+
+        Args:
+            box: item-box 的 HTML 片段
+
+        Returns:
+            三元组；该块没有外站链接 (如查询原图块) 时返回 None
+        """
+        thumbnail = cls._extract_thumbnail(box)
+
+        # 逐个 detail-box 解析：链接与标题必须取自同一个 detail-box，
+        # 否则"标题取第一个 h6、链接回退到任意 small>a"会拼出互不相干的组合。
+        detail_boxes = DETAIL_BOX_PATTERN.findall(box)
+        for detail in detail_boxes or [box]:
+            found = cls._extract_link_and_title(detail)
+            if found is not None:
+                title, url = found
+                return (title, url, thumbnail)
+        return None
+
+    @staticmethod
+    def _extract_thumbnail(box: str) -> str:
+        """提取 item-box 的缩略图 URL.
+
+        Args:
+            box: item-box 的 HTML 片段
+
+        Returns:
+            缩略图 URL，未找到返回空字符串
+        """
+        candidates = IMG_SRC_PATTERN.findall(box)
+        if not candidates:
+            return ""
+        # detail-box 里的站点图标也是 <img>，优先取 /thumbnail/ 下的命中图，
+        # 避免把 pixiv 图标当成结果缩略图。
+        chosen = next((src for src in candidates if "/thumbnail/" in src), candidates[0])
+        if chosen.startswith("http"):
+            return chosen
+        return f"{ASCII2D_BASE_URL}{chosen}"
+
+    @staticmethod
+    def _extract_link_and_title(detail: str) -> tuple[str, str] | None:
+        """从单个 detail-box 中提取 (标题, 外站链接).
+
+        Args:
+            detail: detail-box 的 HTML 片段
+
+        Returns:
+            (标题, 链接)；该片段内没有外站链接时返回 None
+        """
+
+        def clean(text: str) -> str:
+            return TAG_PATTERN.sub("", text).strip()
+
+        def absolutize(href: str) -> str:
+            url = href
+            with contextlib.suppress(Exception):
+                url = urllib.parse.unquote(url)
+            return url
+
+        # 优先 h6 内的锚点 (作品标题所在位置)，回退到同一 detail-box 内的 <small><a>
+        candidate_groups: list[list[tuple[str, str]]] = []
+        for h6_inner in H6_ANCHOR_PATTERN.findall(detail):
+            candidate_groups.append(ANCHOR_PATTERN.findall(h6_inner))
+        candidate_groups.append(SMALL_ANCHOR_PATTERN.findall(detail))
+        candidate_groups.append(ANCHOR_PATTERN.findall(detail))
+
+        for group in candidate_groups:
+            for href, text in group:
+                url = absolutize(href)
+                # 只接受外站绝对链接：站内相对链接是 ascii2d 自己的页面，
+                # 当成溯源结果会把用户导回搜索页。
+                if not url.startswith("http"):
+                    continue
+                title = clean(text) or url
+                return (title, url)
+        return None

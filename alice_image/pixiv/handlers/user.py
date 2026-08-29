@@ -2,15 +2,16 @@ import asyncio
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+
+from ..utils.help import get_help_message
 from ..utils.pixiv_utils import (
     filter_items,
-    send_pixiv_image,
     send_forward_message,
+    send_pixiv_image,
 )
-from ..utils.help import get_help_message
 from ..utils.tag import (
-    build_detail_message,
     FilterConfig,
+    build_detail_message,
     item_has_any_exact_tag,
     process_and_send_illusts,
 )
@@ -45,6 +46,44 @@ class UserHandler:
         except Exception as exc:
             logger.warning("Pixiv 插件：获取画师 %s 名称失败: %s", user_id, exc)
         return f"用户ID {user_id}"
+
+    async def _resolve_artist_id(
+        self, raw_input: str
+    ) -> tuple[int | None, str | None, str | None]:
+        """把用户输入解析为画师数字 ID。
+
+        纯数字直接返回（不产生任何额外 API 调用）；否则调用 search_user
+        取第一个结果，并返回解析到的画师名以便在回复里提示用户。
+
+        :return: (画师数字 ID 或 None, 解析到的画师名或 None, 中文错误提示或 None)
+        """
+        text = str(raw_input or "").strip()
+        if not text:
+            return None, None, "请提供画师 ID 或画师名。"
+        if text.isdigit():
+            return int(text), None, None
+
+        try:
+            json_result = await self.client_wrapper.call_pixiv_api(
+                self.client.search_user, text
+            )
+        except Exception as exc:
+            logger.warning("Pixiv 插件：解析画师名 %s 失败: %s", text, exc)
+            return None, None, f"解析画师「{text}」时出错，请改用画师数字 ID。"
+
+        previews = getattr(json_result, "user_previews", None) or []
+        if not previews:
+            return None, None, f"未找到画师「{text}」，请确认名称或改用画师数字 ID。"
+
+        user = getattr(previews[0], "user", None)
+        user_id_value = getattr(user, "id", None)
+        try:
+            numeric_id = int(user_id_value)
+        except (TypeError, ValueError):
+            return None, None, f"未找到画师「{text}」，请确认名称或改用画师数字 ID。"
+
+        name = str(getattr(user, "name", "") or "").strip() or text
+        return numeric_id, name, None
 
     async def _collect_user_illusts(
         self,
@@ -204,7 +243,7 @@ class UserHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：搜索用户时发生错误 - {e}")
-            yield event.plain_result(f"搜索用户时发生错误: {str(e)}")
+            yield event.plain_result(f"搜索用户时发生错误: {e!s}")
 
     async def pixiv_user_detail(self, event: AstrMessageEvent, user_id: str = ""):
         """获取 Pixiv 用户详情"""
@@ -264,7 +303,7 @@ class UserHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取用户详情时发生错误 - {e}")
-            yield event.plain_result(f"获取用户详情时发生错误: {str(e)}")
+            yield event.plain_result(f"获取用户详情时发生错误: {e!s}")
 
     async def pixiv_user_illusts(
         self,
@@ -286,18 +325,24 @@ class UserHandler:
 
         logger.info(f"Pixiv 插件：正在获取用户作品 - ID: {user_id}")
 
-        # 验证用户ID是否为数字
-        if not user_id.isdigit():
-            yield event.plain_result(f"用户ID必须是数字: {user_id}")
-            return
-
         # 验证是否已认证
         if not await self.client_wrapper.authenticate():
             yield event.plain_result(self.pixiv_config.get_auth_error_message())
             return
 
+        # 支持直接输入画师名：非纯数字时用 search_user 解析成 user_id
+        numeric_user_id, resolved_artist_name, resolve_error = (
+            await self._resolve_artist_id(user_id)
+        )
+        if numeric_user_id is None:
+            yield event.plain_result(resolve_error or f"未找到画师: {user_id}")
+            return
+        if resolved_artist_name:
+            yield event.plain_result(
+                f"已将「{user_id}」解析为画师「{resolved_artist_name}」(ID: {numeric_user_id})。"
+            )
+
         try:
-            numeric_user_id = int(user_id)
             user_name = await self._get_user_name(numeric_user_id)
             initial_illusts = await self._collect_user_illusts(numeric_user_id)
 
@@ -324,7 +369,7 @@ class UserHandler:
 
         except Exception as e:
             logger.error(f"Pixiv 插件：获取用户作品时发生错误 - {e}")
-            yield event.plain_result(f"获取用户作品时发生错误: {str(e)}")
+            yield event.plain_result(f"获取用户作品时发生错误: {e!s}")
 
     async def pixiv_user_random(
         self,
@@ -341,15 +386,22 @@ class UserHandler:
             )
             return
 
-        if not user_id.isdigit():
-            yield event.plain_result(f"用户ID必须是数字: {user_id}")
-            return
-
         if not await self.client_wrapper.authenticate():
             yield event.plain_result(self.pixiv_config.get_auth_error_message())
             return
 
-        numeric_user_id = int(user_id)
+        # 支持直接输入画师名：非纯数字时用 search_user 解析成 user_id
+        numeric_user_id, resolved_artist_name, resolve_error = (
+            await self._resolve_artist_id(user_id)
+        )
+        if numeric_user_id is None:
+            yield event.plain_result(resolve_error or f"未找到画师: {user_id}")
+            return
+        if resolved_artist_name:
+            yield event.plain_result(
+                f"已将「{user_id}」解析为画师「{resolved_artist_name}」(ID: {numeric_user_id})。"
+            )
+
         try:
             user_name = await self._get_user_name(numeric_user_id)
             initial_illusts = await self._collect_user_illusts(
@@ -400,4 +452,4 @@ class UserHandler:
                 yield result
         except Exception as e:
             logger.error(f"Pixiv 插件：获取画师随机作品时发生错误 - {e}")
-            yield event.plain_result(f"获取画师随机作品时发生错误: {str(e)}")
+            yield event.plain_result(f"获取画师随机作品时发生错误: {e!s}")

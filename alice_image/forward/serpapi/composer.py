@@ -8,9 +8,8 @@ import math
 import ssl
 
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
-
 from astrbot.api import logger
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from .image_utils import HttpService
 
@@ -84,7 +83,7 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     ):
         try:
             return ImageFont.truetype(font_name, size)
-        except (IOError, OSError):
+        except OSError:
             continue
     try:
         # Pillow ≥10.1 支持给位图默认字体指定字号，编号更清晰
@@ -109,7 +108,7 @@ def _create_collage_sync(
             img = img.resize((tile_size, tile_size), Image.Resampling.LANCZOS)
             successful_images.append(img)
             successful_urls.append(original_urls[i])
-        except (IOError, UnidentifiedImageError, Image.DecompressionBombError) as e:
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as e:
             logger.debug(
                 f"[alice_image_serpapi] 跳过无法处理的图片 {original_urls[i]}: {e}"
             )

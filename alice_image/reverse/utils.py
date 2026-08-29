@@ -9,6 +9,7 @@ import asyncio
 import base64
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -21,6 +22,10 @@ CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 # 全局共享的 aiohttp ClientSession
 _aiohttp_session: aiohttp.ClientSession | None = None
 _aiohttp_session_lock = asyncio.Lock()
+# 全局会话的持有者数量（引用计数）
+# 热重载时新旧插件实例会短暂共存，直接关闭全局会话会让另一个实例抛
+# "Session is closed"，因此改成"最后一个持有者退出时才真正关闭"。
+_aiohttp_session_users = 0
 # 全局代理设置
 _proxy_url: str | None = None
 # 全局 User-Agent 设置
@@ -92,6 +97,41 @@ def _sanitize_url_for_logging(url: str) -> str:
     except Exception:
         # 如果解析失败，返回一个安全的占位符
         return "<URL removed for security>"
+
+
+def coerce_int(
+    value: Any,
+    default: int,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    """将配置值强制转换为整数并夹到给定区间.
+
+    WebUI / YAML 里的数值配置可能是字符串 (如 "40")，直接参与 max()/min()
+    比较会抛 TypeError 并让插件初始化失败，因此所有数值配置都必须过这一层。
+
+    Args:
+        value: 原始配置值
+        default: 无法转换时使用的默认值
+        minimum: 下界，None 表示不限制
+        maximum: 上界，None 表示不限制
+
+    Returns:
+        转换并夹紧后的整数
+    """
+    # bool 是 int 的子类，但把 True 当成 1 几乎总是配置写错，直接退回默认值
+    if isinstance(value, bool):
+        result = default
+    else:
+        try:
+            result = int(str(value).strip() if isinstance(value, str) else value)
+        except (TypeError, ValueError):
+            result = default
+    if minimum is not None:
+        result = max(minimum, result)
+    if maximum is not None:
+        result = min(maximum, result)
+    return result
 
 
 def set_proxy_url(proxy_url: str | None) -> None:
@@ -212,12 +252,36 @@ async def get_aiohttp_session() -> aiohttp.ClientSession:
         return _aiohttp_session
 
 
+def retain_aiohttp_session() -> None:
+    """登记一个全局会话持有者.
+
+    插件实例初始化时调用，与 close_aiohttp_session() 成对使用。
+    """
+    global _aiohttp_session_users
+    _aiohttp_session_users += 1
+
+
+def get_aiohttp_session_users() -> int:
+    """获取当前全局会话持有者数量 (供测试与诊断使用)."""
+    return _aiohttp_session_users
+
+
 async def close_aiohttp_session() -> None:
-    """关闭全局共享的 aiohttp ClientSession.
+    """释放一个全局会话持有者，必要时关闭会话.
 
     在插件卸载时调用，避免资源泄漏和事件循环清理警告。
+    热重载期间可能同时存在多个持有者，只有最后一个退出时才真正关闭会话，
+    否则仍在工作的实例会拿到已关闭的会话并抛 "Session is closed"。
     """
-    global _aiohttp_session
+    global _aiohttp_session, _aiohttp_session_users
+    if _aiohttp_session_users > 0:
+        _aiohttp_session_users -= 1
+    if _aiohttp_session_users > 0:
+        logger.debug(
+            f"[AliceImageReverse] 仍有 {_aiohttp_session_users} 个持有者，"
+            "保留全局 aiohttp ClientSession"
+        )
+        return
     if _aiohttp_session is not None and not _aiohttp_session.closed:
         await _aiohttp_session.close()
         logger.debug("[AliceImageReverse] aiohttp ClientSession 已关闭")
@@ -321,7 +385,7 @@ def _read_file_bytes(file_path: str) -> bytes:
     Returns:
         文件字节数据
     """
-    with open(file_path, "rb") as f:
+    with Path(file_path).open("rb") as f:
         return f.read()
 
 
@@ -359,9 +423,8 @@ async def read_image_bytes(source: str) -> bytes | None:
     #   - Windows 绝对路径 (C:\path 或 C:/path)
     #   - POSIX 绝对路径 (/home/user/xxx.png)
     if (
-        source.startswith("file://")
+        source.startswith(("file://", "/"))
         or re.match(r"^[A-Za-z]:[/\\]", source)
-        or source.startswith("/")
     ):
         if not is_local_file_access_allowed():
             logger.warning(

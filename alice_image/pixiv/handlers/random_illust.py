@@ -1,20 +1,18 @@
 from astrbot.api.event import AstrMessageEvent
 
-from ..utils.tag import validate_and_process_tags
-
-from ..utils.random_search import RandomSearchService
-
 from ..utils.database import (
-    add_random_tag,
-    remove_random_tag,
-    get_random_tags,
-    suspend_random_search,
-    resume_random_search,
-    get_random_search_status,
     add_random_ranking,
-    remove_random_ranking,
+    add_random_tag,
+    get_random_search_status,
+    get_random_tags,
     list_random_rankings,
+    remove_random_ranking,
+    remove_random_tag,
+    resume_random_search,
+    suspend_random_search,
 )
+from ..utils.random_search import RandomSearchService
+from ..utils.tag import validate_and_process_tags
 
 
 class RandomIllustHandler:
@@ -53,7 +51,7 @@ class RandomIllustHandler:
         # 构造用于发送消息的 session_id
         session_id = event.unified_msg_origin
 
-        success, message = add_random_tag(chat_id, session_id, cleaned_tags)
+        _success, message = add_random_tag(chat_id, session_id, cleaned_tags)
         yield event.plain_result(message)
 
     async def pixiv_random_del(self, event: AstrMessageEvent, index: str = ""):
@@ -67,7 +65,7 @@ class RandomIllustHandler:
         idx = int(index) - 1  # 转换为 0-indexed
         chat_id = event.get_group_id() or event.get_sender_id()
 
-        success, message = remove_random_tag(chat_id, idx)
+        _success, message = remove_random_tag(chat_id, idx)
         yield event.plain_result(message)
 
     async def pixiv_random_list(self, event: AstrMessageEvent, args: str = ""):
@@ -146,7 +144,7 @@ class RandomIllustHandler:
         chat_id = event.get_group_id() or event.get_sender_id()
 
         # 检查是否有配置随机搜索
-        has_config, is_suspended = get_random_search_status(chat_id)
+        has_config, _is_suspended = get_random_search_status(chat_id)
         if not has_config:
             yield event.plain_result("当前群聊没有配置随机搜索标签。")
             return
@@ -208,7 +206,7 @@ class RandomIllustHandler:
         chat_id = event.get_group_id() or event.get_sender_id()
         session_id = event.unified_msg_origin
 
-        success, message = add_random_ranking(chat_id, session_id, mode, date)
+        _success, message = add_random_ranking(chat_id, session_id, mode, date)
         yield event.plain_result(message)
 
     async def pixiv_random_ranking_del(self, event: AstrMessageEvent, index: str = ""):
@@ -222,7 +220,7 @@ class RandomIllustHandler:
         idx = int(index) - 1
         chat_id = event.get_group_id() or event.get_sender_id()
 
-        success, message = remove_random_ranking(chat_id, idx)
+        _success, message = remove_random_ranking(chat_id, idx)
         yield event.plain_result(message)
 
     async def pixiv_random_ranking_list(self, event: AstrMessageEvent, args: str = ""):

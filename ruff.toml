@@ -1,0 +1,46 @@
+# Lint configuration for astrbot_plugin_alice_image_assistant.
+#
+# 规则集尽量宽，但排除掉和插件架构对着干的检查：为了「永不把 Bot 搞崩」而写的
+# 宽泛 except、中文文案里的全角标点、以及 AstrBot 自己的公共命名。
+
+target-version = "py310"
+line-length = 100
+extend-exclude = ["data", "assets", "__pycache__", "alice_image/pixiv/data"]
+
+[lint]
+select = [
+    "E",      # pycodestyle
+    "W",
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # bugbear
+    "C4",     # comprehensions
+    "SIM",    # simplify
+    "RET",    # return
+    "PTH",    # pathlib
+    "PIE",
+    "RUF",
+    "ASYNC",
+    "A",      # builtin shadowing
+]
+ignore = [
+    "E501",    # 帮助文案里的长中文串没必要折行
+    "SIM105",  # contextlib.suppress 会掩盖到底哪一步炸了
+    "SIM115",  # 手动关闭的临时文件句柄
+    "RUF001",  # 中文文案里的全角标点是刻意的
+    "RUF002",
+    "RUF003",
+    "RET504",  # 具名结果往往比内联 return 更好读
+    "B008",
+    "A003",
+    "A004",    # astrbot.api.event.filter 是框架的公共名字
+    "ASYNC240", # AstrBot 跑在 asyncio 上，不是 trio/anyio
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

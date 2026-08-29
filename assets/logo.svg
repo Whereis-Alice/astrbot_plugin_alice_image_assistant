@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="alice-logo-title">
+  <title id="alice-logo-title">爱丽丝的图片助手</title>
+  <defs>
+    <linearGradient id="alicePlate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2352"/>
+      <stop offset="1" stop-color="#170f26"/>
+    </linearGradient>
+    <linearGradient id="aliceGold" x1="0.08" y1="0" x2="0.92" y2="1">
+      <stop offset="0" stop-color="#f5e2a0"/>
+      <stop offset="0.55" stop-color="#dfbe64"/>
+      <stop offset="1" stop-color="#c49228"/>
+    </linearGradient>
+    <linearGradient id="aliceRidge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0dca2"/>
+      <stop offset="1" stop-color="#b78a2c"/>
+    </linearGradient>
+    <clipPath id="aliceLens">
+      <circle cx="216" cy="205" r="94"/>
+    </clipPath>
+  </defs>
+
+  <rect x="4" y="4" width="504" height="504" rx="116" fill="url(#alicePlate)"/>
+  <rect x="11" y="11" width="490" height="490" rx="110" fill="none" stroke="#f5e2a0" stroke-opacity="0.2" stroke-width="5"/>
+
+  <g clip-path="url(#aliceLens)">
+    <rect x="120" y="109" width="192" height="192" fill="#120c1e"/>
+    <circle cx="184" cy="152" r="27" fill="#241a38"/>
+    <circle cx="206" cy="164" r="19" fill="#241a38"/>
+    <circle cx="167" cy="145" r="3.4" fill="#faf0d2"/>
+    <circle cx="196" cy="139" r="2.6" fill="#faf0d2"/>
+    <circle cx="181" cy="167" r="2.2" fill="#faf0d2" fill-opacity="0.8"/>
+    <path d="M268 126a35 35 0 1 0 15 45 27.5 27.5 0 0 1-15-45z" fill="#f7e7ae"/>
+    <path d="M120 269 L185 195 L245 269 Z" fill="url(#aliceRidge)"/>
+    <path d="M205 269 L261 209 L312 269 Z" fill="#b78a2c"/>
+    <rect x="120" y="266" width="192" height="35" fill="#120c1e"/>
+    <path d="M136 120 L318 244" stroke="#ffffff" stroke-opacity="0.11" stroke-width="44" stroke-linecap="round"/>
+  </g>
+
+  <circle cx="216" cy="205" r="94" fill="none" stroke="url(#aliceGold)" stroke-width="26"/>
+  <path d="M282 271 L392 381" stroke="url(#aliceGold)" stroke-width="40" stroke-linecap="round"/>
+
+  <g fill="#faf0d2">
+    <path d="M407 68 L414.7 102.3 L449 110 L414.7 117.7 L407 152 L399.3 117.7 L365 110 L399.3 102.3 Z"/>
+    <path d="M338 18 L343 40 L365 45 L343 50 L338 72 L333 50 L311 45 L333 40 Z" fill-opacity="0.88"/>
+    <path d="M87 370 L92 392 L114 397 L92 402 L87 424 L82 402 L60 397 L82 392 Z" fill-opacity="0.82"/>
+  </g>
+</svg>

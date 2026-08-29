@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, unquote, urlsplit
 
-
 _PIXIV_URL_PATTERN = re.compile(
     r"(?<![\w.-])(?:https?://)?(?:(?:www|m|touch)\.)?pixiv\.net/[^\s<>\"'，。；：！？、）】》」』”’]+",
     re.IGNORECASE,

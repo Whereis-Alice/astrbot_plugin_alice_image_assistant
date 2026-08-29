@@ -1,42 +1,61 @@
 """图片搜索服务.
 
-协调各搜图策略，并行执行搜索并聚合结果。
+协调各搜图策略，并行执行搜索、跨引擎融合排序并下载缩略图。
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 
 from astrbot.api import logger
 
-from .constant import STRATEGY_ALIAS_MAP
+from .constant import (
+    DEFAULT_MAX_RESULTS,
+    DEFAULT_TOTAL_TIMEOUT_SECONDS,
+    MAX_TOTAL_TIMEOUT_SECONDS,
+    MIN_PER_ENGINE_FETCH,
+    MIN_TOTAL_TIMEOUT_SECONDS,
+    STRATEGY_ALIAS_MAP,
+)
 from .models import ExplorationResult, SearchResultItem
+from .ranking import merge_and_rank
 from .strategy import ImageSearchStrategy
-from .utils import download_bytes
+from .utils import coerce_int, download_bytes
 
 
 class AliceImageReverseService:
     """图片搜索服务.
 
-    负责协调多个搜图策略并行执行，聚合结果并下载缩略图。
+    负责协调多个搜图策略并行执行，融合排序结果并下载缩略图。
     """
 
     def __init__(
         self,
         strategies: list[ImageSearchStrategy],
-        max_results: int = 5,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        total_timeout_seconds: int = DEFAULT_TOTAL_TIMEOUT_SECONDS,
     ) -> None:
         """初始化搜索服务.
 
         Args:
             strategies: 搜图策略列表
+            max_results: 最终展示条数上限 (跨引擎融合去重后的总条数)
+            total_timeout_seconds: 单个策略的总超时时间 (秒)
         """
         self.strategies = strategies
-        try:
-            self.max_results = max(1, min(int(max_results), 10))
-        except (TypeError, ValueError):
-            self.max_results = 5
+        # display.max_results 的语义是"最终展示条数"，不是"每引擎条数"
+        self.max_results = coerce_int(max_results, DEFAULT_MAX_RESULTS, 1, 10)
+        # 每引擎抓取上限可以大于展示上限：跨引擎去重会吃掉一部分结果，
+        # 抓少了会导致融合后凑不满展示条数。
+        self.per_engine_fetch = max(self.max_results, MIN_PER_ENGINE_FETCH)
+        self.total_timeout_seconds = coerce_int(
+            total_timeout_seconds,
+            DEFAULT_TOTAL_TIMEOUT_SECONDS,
+            MIN_TOTAL_TIMEOUT_SECONDS,
+            MAX_TOTAL_TIMEOUT_SECONDS,
+        )
         # 建立策略名称索引
         self._strategy_map: dict[str, ImageSearchStrategy] = {}
         for strategy in self.strategies:
@@ -86,6 +105,41 @@ class AliceImageReverseService:
 
         return resolved, not_found
 
+    async def _run_strategy(
+        self, strategy: ImageSearchStrategy, image_url: str
+    ) -> list[SearchResultItem]:
+        """执行单个策略并施加总超时.
+
+        超时只掐掉当前策略，其它策略的结果照常保留，避免一个慢引擎
+        (ascii2d 内部有多次串行请求) 把整次搜图拖成空结果。
+
+        Args:
+            strategy: 搜图策略
+            image_url: 图片 URL
+
+        Returns:
+            该策略的结果列表，超时或异常时返回空列表
+        """
+        name = strategy.get_service_name()
+        try:
+            items = await asyncio.wait_for(
+                strategy.search(image_url), timeout=self.total_timeout_seconds
+            )
+        except TimeoutError:
+            logger.warning(
+                f"[AliceImageReverse] 策略 [{name}] 超过 "
+                f"{self.total_timeout_seconds}s 总超时，已放弃该引擎结果"
+            )
+            return []
+        except Exception as e:
+            logger.error(f"[AliceImageReverse] 策略 [{name}] 执行失败: {e}")
+            return []
+
+        if not isinstance(items, list):
+            logger.warning(f"[AliceImageReverse] 策略 [{name}] 返回了非列表结果，已忽略")
+            return []
+        return items[: self.per_engine_fetch]
+
     async def explore(
         self, image_url: str, strategy_names: list[str] | None = None
     ) -> ExplorationResult:
@@ -96,7 +150,7 @@ class AliceImageReverseService:
             strategy_names: 指定使用的策略名称列表，None 表示使用所有策略
 
         Returns:
-            包含所有搜索结果的 ExplorationResult
+            包含融合排序后结果的 ExplorationResult
         """
         # 解析要使用的策略
         strategies_to_use, not_found = self.resolve_strategy_names(strategy_names)
@@ -123,63 +177,95 @@ class AliceImageReverseService:
         )
 
         try:
-            # 并行调用所有策略
-            tasks = [strategy.search(image_url) for strategy in strategies_to_use]
-            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+            # 并行调用所有策略；每个策略单独包超时与异常，互不牵连
+            results_list = await asyncio.gather(
+                *[
+                    self._run_strategy(strategy, image_url)
+                    for strategy in strategies_to_use
+                ],
+                return_exceptions=True,
+            )
 
             # 聚合结果
             all_items: list[SearchResultItem] = []
-            for i, result in enumerate(results_list):
-                if isinstance(result, Exception):
+            for index, result in enumerate(results_list):
+                if isinstance(result, BaseException):
                     logger.error(
-                        f"[AliceImageReverse] 策略 [{strategies_to_use[i].get_service_name()}] 执行失败: {result}"
+                        f"[AliceImageReverse] 策略 "
+                        f"[{strategies_to_use[index].get_service_name()}] 异常: {result}"
                     )
-                elif isinstance(result, list):
-                    # 配置定义的是“每个引擎”的结果上限；上游此前读取但未应用。
-                    all_items.extend(result[: self.max_results])
+                    continue
+                all_items.extend(result)
 
+            # 先跨引擎融合排序去重，再按展示上限截断，保证高置信度结果不被挤掉
+            items = merge_and_rank(all_items, self.max_results)
             logger.info(
-                f"[AliceImageReverse] 搜索完成，共获取 {len(all_items)} 条结果，开始下载缩略图..."
+                f"[AliceImageReverse] 搜索完成，原始 {len(all_items)} 条 -> "
+                f"融合后 {len(items)} 条，开始下载缩略图..."
             )
 
-            # 并行下载缩略图
-            await self._fill_thumbnails(all_items)
+            # 并行下载缩略图 (只下载最终要展示的那几条)
+            await self._fill_thumbnails(items)
 
             elapsed = time.monotonic() - start_time
             logger.info(f"[AliceImageReverse] 任务结束，总耗时: {elapsed:.2f}s")
 
-            return ExplorationResult(items=all_items)
+            return ExplorationResult(items=items)
 
         except Exception as e:
             logger.error(f"[AliceImageReverse] 搜索主流程异常: {e}")
             return ExplorationResult()
 
-    @staticmethod
-    async def _fill_thumbnails(items: list[SearchResultItem]) -> None:
+    def _get_thumbnail_fetcher(
+        self, item: SearchResultItem
+    ) -> Callable[[str], Awaitable[bytes | None]]:
+        """获取结果项对应的缩略图下载函数.
+
+        ascii2d 等站点需要用策略自己的会话 (指纹 + Cookie + Referer) 才能取图，
+        因此优先使用策略提供的 fetch_thumbnail 钩子。
+
+        Args:
+            item: 搜索结果项
+
+        Returns:
+            缩略图下载协程函数
+        """
+        strategy = self._strategy_map.get((item.source or "").strip().lower())
+        fetcher = getattr(strategy, "fetch_thumbnail", None)
+        if callable(fetcher):
+            return fetcher
+        return download_bytes
+
+    async def _fill_thumbnails(self, items: list[SearchResultItem]) -> None:
         """并行下载缩略图并回填到结果项中.
 
         Args:
-            items: 搜索结果列表
+            items: 搜索结果列表 (原地更新)
         """
         # 找出需要下载缩略图的项
-        download_tasks = []
-        indices = []
-
-        for i, item in enumerate(items):
-            # 如果已有缩略图字节或没有缩略图 URL，跳过
-            if item.thumbnail_bytes is not None or not item.thumbnail:
-                continue
-
-            indices.append(i)
-            download_tasks.append(download_bytes(item.thumbnail))
-
-        if not download_tasks:
+        targets = [
+            index
+            for index, item in enumerate(items)
+            if item.thumbnail_bytes is None and item.thumbnail
+        ]
+        if not targets:
             return
 
-        # 并行下载
-        results = await asyncio.gather(*download_tasks, return_exceptions=False)
+        # return_exceptions=True：一张缩略图失败 (或被取消) 不该让整批结果丢失，
+        # 缩略图只是附加信息，降级为"无图"即可。
+        results = await asyncio.gather(
+            *[
+                self._get_thumbnail_fetcher(items[index])(items[index].thumbnail)
+                for index in targets
+            ],
+            return_exceptions=True,
+        )
 
-        # 回填缩略图字节
-        for idx, bytes_data in zip(indices, results, strict=True):
+        for index, bytes_data in zip(targets, results, strict=True):
+            if isinstance(bytes_data, BaseException):
+                logger.debug(
+                    f"[AliceImageReverse] 缩略图下载失败，降级为无图: {bytes_data}"
+                )
+                continue
             if bytes_data:
-                items[idx] = items[idx].with_thumbnail_bytes(bytes_data)
+                items[index] = items[index].with_thumbnail_bytes(bytes_data)

@@ -52,7 +52,8 @@ class SessionReviewTests(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": "预设问题"},
             {"role": "assistant", "content": "预设回答"},
         ]
-        dialogue = persona + [
+        dialogue = [
+            *persona,
             {"role": "user", "content": "当前请求"},
         ]
 

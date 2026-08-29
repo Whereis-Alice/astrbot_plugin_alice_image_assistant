@@ -101,7 +101,7 @@ class PixivForwardSearchService:
             try:
                 done_task.result()
                 logger.info("[AliceImagePixiv] 后台发送任务已完成。")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("[AliceImagePixiv] 后台发送任务最终失败: %s", exc)
 
         task.add_done_callback(_done)
@@ -116,7 +116,7 @@ class PixivForwardSearchService:
             try:
                 await event.send(result)
                 return True, False, ""
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 return False, True, str(exc)
 
         task = asyncio.create_task(event.send(result))
@@ -130,7 +130,7 @@ class PixivForwardSearchService:
                 True,
                 f"发送等待超过 {timeout_seconds:g} 秒，已转入后台继续等待平台确认",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, True, str(exc)
 
     async def _provider(
@@ -179,7 +179,7 @@ class PixivForwardSearchService:
                     )
                 else:
                     break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("[AliceImagePixiv] 第 %s 页搜索失败: %s", page + 1, exc)
                 break
             page_items = list(getattr(response, "illusts", None) or [])
@@ -241,7 +241,7 @@ class PixivForwardSearchService:
                         ),
                         "",
                     )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "[AliceImagePixiv] 获取画师详情失败，继续使用用户 ID %s: %s",
                     user_id,
@@ -258,7 +258,7 @@ class PixivForwardSearchService:
                 self.controller.client.search_user,
                 name,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("[AliceImagePixiv] 搜索画师失败: %s", exc)
             return None, f"搜索 Pixiv 画师失败：{exc}"
 
@@ -409,7 +409,7 @@ class PixivForwardSearchService:
                     )
                 else:
                     break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "[AliceImagePixiv] 获取画师 %s 第 %s 页作品失败: %s",
                     target.user_id,
@@ -515,7 +515,7 @@ class PixivForwardSearchService:
                     provider,
                     max_selection=count,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("[AliceImagePixiv] 视觉审核异常: %s", exc)
             if fail_open:
                 return items[:count], ReviewStatus.ERROR, ""
