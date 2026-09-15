@@ -45,6 +45,14 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertEqual(schema["webui"]["description"], "Dashboard WebUI")
         self.assertIs(schema["webui"]["items"]["enabled"]["default"], True)
 
+        reverse = schema["reverse_image"]["items"]
+        strategies = reverse["strategies"]["items"]
+        api_keys = reverse["api_keys"]["items"]
+        self.assertTrue(strategies["enable_yandex"]["default"])
+        self.assertEqual(strategies["yandex_max_results"]["default"], 5)
+        self.assertTrue(strategies["yandex_use_ru_fallback"]["default"])
+        self.assertTrue(api_keys["yandex_cookies"]["is_sensitive"])
+
     def test_every_pixiv_feature_is_boolean_and_defaulted(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
         features = schema["find_image"]["items"]["pixiv"]["items"]["features"]["items"]

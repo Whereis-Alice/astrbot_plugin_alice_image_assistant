@@ -1260,6 +1260,7 @@ function strategyChoices() {
     { key: "saucenao", label: "SauceNAO", enabled: true },
     { key: "google_lens", label: "Google Lens", enabled: true },
     { key: "ascii2d", label: "Ascii2D", enabled: true },
+    { key: "yandex", label: "Yandex", enabled: true },
   ];
 }
 

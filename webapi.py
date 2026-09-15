@@ -103,6 +103,7 @@ STRATEGY_LABELS: dict[str, str] = {
     "saucenao": "SauceNAO",
     "google_lens": "Google Lens",
     "ascii2d": "ascii2d",
+    "yandex": "Yandex",
 }
 STATE_TABS: frozenset[str] = frozenset(
     {"overview", "search", "reverse", "config", "commands", "about"}

@@ -9,6 +9,11 @@
 | [monbed/astrbot_plugin_serpapi_imgsearch](https://github.com/monbed/astrbot_plugin_serpapi_imgsearch) | monbed 及贡献者 | `37d892200add8dda105488022db79632e5b2b7ca` | AGPL-3.0 | 仅文字搜图：SerpApi 多 Key 客户端、Google Images 候选、拼图与 VLM 淘汰赛 |
 | [iona-s/astrbot_plugin_imgexploration](https://github.com/iona-s/astrbot_plugin_imgexploration) | FlanChanXwO、iona-s 及贡献者 | `49e79e6bcdf2b790260f08823264718642c4de03` | AGPL-3.0 | 完整以图搜图：SauceNAO、Google Lens、Ascii2d、会话图片上下文、等待/回复图片交互和降级输出 |
 
+Yandex 策略的页面入口、Cookie 可选和 `.com -> .ru` 回退思路参考了
+[OMSociety/astrbot_plugin_reverse_searcher](https://github.com/OMSociety/astrbot_plugin_reverse_searcher)。
+本项目对 Yandex 的请求、HTML 状态解析、结果模型和安全处理均为独立实现，未复制该项目代码，
+也不引入其 `pyquery` 依赖；该项目不作为本插件的运行时依赖。
+
 本项目整体按 `AGPL-3.0` 发布。GPL-3.0 来源代码依照 GPLv3 第 13 条与 AGPLv3 代码组合，组合后的作品按 AGPL-3.0 提供。完整条款见根目录 [LICENSE](LICENSE)。
 
 主要修改包括：统一插件命名空间与命令/工具标识符；加入两级模块配置和功能级开关；加入自动选源与失败回退；为 Pixiv 增加候选视觉审核；修复配置持久化、未生效的结果上限、阻塞式 Token 刷新、插件加载阶段的同步网络探测、关闭图片上下文后指令等待失效，以及失效的模拟 Agent 上下文。

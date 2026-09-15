@@ -92,6 +92,21 @@ ASCII2D_TOKEN_TTL_SECONDS = 600
 # Ascii2d 单次搜索返回条数默认值 (bovw + color 去重后)
 DEFAULT_ASCII2D_MAX_RESULTS = 5
 
+# ================================================================================
+# Yandex 策略
+# ================================================================================
+
+# Yandex 图片反搜页面地址。Yandex 没有稳定的公开 JSON API，这里读取图片搜索
+# 页面里的 initialState.cbirSites.sites；Cookie 仅用于降低风控，不是必填项。
+YANDEX_BASE_URL = "https://yandex.com"
+YANDEX_RU_BASE_URL = "https://yandex.ru"
+YANDEX_SEARCH_PATH = "/images/search"
+YANDEX_SEARCH_URL = f"{YANDEX_BASE_URL}{YANDEX_SEARCH_PATH}"
+YANDEX_RU_SEARCH_URL = f"{YANDEX_RU_BASE_URL}{YANDEX_SEARCH_PATH}"
+
+# Yandex 不返回可直接比较的相似度，结果位次会经过 positional_score() 折算。
+DEFAULT_YANDEX_MAX_RESULTS = 5
+
 # ==============================================================================
 # 结果来源标识
 # ==============================================================================
@@ -102,6 +117,7 @@ SOURCE_KEY_GOOGLE_LENS = "google_lens"
 SOURCE_KEY_ASCII2D = "ascii2d"
 SOURCE_KEY_ASCII2D_BOVW = "ascii2d/bovw"
 SOURCE_KEY_ASCII2D_COLOR = "ascii2d/color"
+SOURCE_KEY_YANDEX = "yandex"
 
 # 来源可信度系数：把“位次分数”折算成跨引擎可比的置信度
 # SauceNAO 直接给相似度，可信度最高；ascii2d bovw (特征) 强于 color (配色)；
@@ -112,6 +128,7 @@ SOURCE_CONFIDENCE: dict[str, float] = {
     SOURCE_KEY_ASCII2D: 0.8,
     SOURCE_KEY_ASCII2D_COLOR: 0.7,
     SOURCE_KEY_GOOGLE_LENS: 0.6,
+    SOURCE_KEY_YANDEX: 0.58,
 }
 
 # 未知来源的可信度系数
@@ -124,6 +141,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     SOURCE_KEY_ASCII2D: 2,
     SOURCE_KEY_ASCII2D_COLOR: 3,
     SOURCE_KEY_GOOGLE_LENS: 4,
+    SOURCE_KEY_YANDEX: 5,
 }
 
 # 未知来源的优先级
@@ -136,6 +154,8 @@ SOURCE_NAME_TO_KEY: dict[str, str] = {
     "googlelens": SOURCE_KEY_GOOGLE_LENS,
     "google": SOURCE_KEY_GOOGLE_LENS,
     "ascii2d": SOURCE_KEY_ASCII2D,
+    "yandex": SOURCE_KEY_YANDEX,
+    "yandex images": SOURCE_KEY_YANDEX,
 }
 
 # ==============================================================================
@@ -151,4 +171,6 @@ STRATEGY_ALIAS_MAP = {
     "ascii2d": "Ascii2d",
     "ascii": "Ascii2d",
     "2d": "Ascii2d",
+    "yandex": "Yandex",
+    "yandex images": "Yandex",
 }

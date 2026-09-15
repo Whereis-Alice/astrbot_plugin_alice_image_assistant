@@ -341,7 +341,7 @@
   "reverse_image": {
     "type": "object",
     "description": "以图搜图模块",
-    "hint": "支持 SauceNAO、Google Lens、Ascii2d，保留附图、回复图和等待下一张图的指令交互。",
+    "hint": "支持 SauceNAO、Google Lens、Ascii2d、Yandex，保留附图、回复图和等待下一张图的指令交互。",
     "items": {
       "enabled": {"type": "bool", "description": "启用以图搜图模块", "default": true},
       "commands_enabled": {"type": "bool", "description": "启用 /aa溯 指令", "default": true},
@@ -387,7 +387,8 @@
           "saucenao_api_key": {"type": "string", "description": "SauceNAO API Key", "is_sensitive": true, "default": ""},
           "serpapi_keys": {"type": "list", "description": "Google Lens SerpApi Keys", "default": []},
           "ascii2d_session_id": {"type": "string", "description": "Ascii2d _session_id", "is_sensitive": true, "default": ""},
-          "ascii2d_cf_clearance": {"type": "string", "description": "Ascii2d cf_clearance", "is_sensitive": true, "default": ""}
+          "ascii2d_cf_clearance": {"type": "string", "description": "Ascii2d cf_clearance", "is_sensitive": true, "default": ""},
+          "yandex_cookies": {"type": "string", "description": "Yandex Cookie（可选）", "hint": "粘贴浏览器导出的 name=value; name2=value2；Cookie 会过期，不填也可尝试公开搜索。", "is_sensitive": true, "default": ""}
         }
       },
       "strategies": {
@@ -400,7 +401,10 @@
           "enable_google_lens": {"type": "bool", "description": "启用 Google Lens", "default": true},
           "google_lens_max_results": {"type": "int", "description": "Google Lens 取用的视觉匹配条数", "hint": "范围 1–30。Google Lens 不给相似度，插件按返回位次折算分数。", "default": 8, "slider": {"min": 1, "max": 30, "step": 1}},
           "enable_ascii2d": {"type": "bool", "description": "启用 Ascii2d", "default": true},
-          "ascii2d_max_results": {"type": "int", "description": "Ascii2d 单次返回条数", "hint": "范围 1–20。bovw（特征）与 color（颜色）两种模式的结果会先按链接去重再截断。", "default": 5, "slider": {"min": 1, "max": 20, "step": 1}}
+          "ascii2d_max_results": {"type": "int", "description": "Ascii2d 单次返回条数", "hint": "范围 1–20。bovw（特征）与 color（颜色）两种模式的结果会先按链接去重再截断。", "default": 5, "slider": {"min": 1, "max": 20, "step": 1}},
+          "enable_yandex": {"type": "bool", "description": "启用 Yandex", "hint": "无需 API Key；公开页面可能受地区或 CAPTCHA 影响。", "default": true},
+          "yandex_max_results": {"type": "int", "description": "Yandex 单次返回条数", "hint": "范围 1–30。Yandex 不提供真实相似度，插件按结果位次参与融合排序。", "default": 5, "slider": {"min": 1, "max": 30, "step": 1}},
+          "yandex_use_ru_fallback": {"type": "bool", "description": "Yandex .ru 回退", "hint": "访问 .com 被风控、限流或页面结构异常时自动尝试 yandex.ru。", "default": true}
         }
       },
       "display": {

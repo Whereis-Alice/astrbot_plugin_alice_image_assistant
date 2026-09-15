@@ -1,7 +1,7 @@
 """把自然语言搜图意图路由到现有反查策略。
 
 参考了同类插件的“意图选择引擎”思路，但这里不引入新的搜索引擎：
-路由只在 Alice 已有的 SauceNAO、Google Lens、Ascii2d 之间选择，
+路由只在 Alice 已有的 SauceNAO、Google Lens、Ascii2d、Yandex 之间选择，
 并且始终以运行时实际加载的策略为准。
 """
 
@@ -50,7 +50,7 @@ _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
         key="character",
         label="角色 / 人物",
-        priorities=("saucenao", "ascii2d", "googlelens"),
+        priorities=("saucenao", "ascii2d", "yandex", "googlelens"),
         keywords=(
             ("哪个角色", 14),
             ("角色是谁", 14),
@@ -66,7 +66,7 @@ _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
         key="source",
         label="出处 / 作者",
-        priorities=("saucenao", "ascii2d", "googlelens"),
+        priorities=("saucenao", "ascii2d", "yandex", "googlelens"),
         keywords=(
             ("图片出处", 14),
             ("找出处", 14),
@@ -85,7 +85,7 @@ _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
         key="similar",
         label="相似图片",
-        priorities=("googlelens", "ascii2d", "saucenao"),
+        priorities=("yandex", "googlelens", "ascii2d", "saucenao"),
         keywords=(
             ("找相似图", 15),
             ("相似图片", 14),
@@ -102,7 +102,7 @@ _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
         key="anime",
         label="动漫 / 插画",
-        priorities=("ascii2d", "saucenao", "googlelens"),
+        priorities=("ascii2d", "saucenao", "yandex", "googlelens"),
         keywords=(
             ("二次元", 12),
             ("动漫图", 12),
@@ -119,7 +119,7 @@ _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
         key="web",
         label="原图 / 网页",
-        priorities=("googlelens", "saucenao", "ascii2d"),
+        priorities=("googlelens", "yandex", "saucenao", "ascii2d"),
         keywords=(
             ("找原图", 14),
             ("原图链接", 14),
@@ -141,6 +141,7 @@ _STRATEGY_ALIASES: dict[str, frozenset[str]] = {
     "saucenao": frozenset({"saucenao", "sauce", "saucenao搜索", "sauce nao"}),
     "googlelens": frozenset({"google", "googlelens", "google lens", "lens"}),
     "ascii2d": frozenset({"ascii2d", "ascii", "ascii 2d", "2d"}),
+    "yandex": frozenset({"yandex", "yandex images", "yandex图片"}),
 }
 _ALL_INTENT_ALIASES = frozenset({"all", "全部", "所有", "并行", "全部策略"})
 

@@ -38,6 +38,9 @@ from astrbot_plugin_alice_image_assistant.alice_image.reverse.sauce_nao_strategy
     SauceNaoStrategy,
 )
 from astrbot_plugin_alice_image_assistant.alice_image.reverse.utils import coerce_int
+from astrbot_plugin_alice_image_assistant.alice_image.reverse.yandex_strategy import (
+    YandexStrategy,
+)
 
 
 def _item(
@@ -560,7 +563,8 @@ class ControllerConfigRobustnessTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         try:
-            self.assertEqual(controller.strategies, [])
+            self.assertEqual(len(controller.strategies), 1)
+            self.assertIsInstance(controller.strategies[0], YandexStrategy)
             self.assertEqual(controller.service.max_results, DEFAULT_MAX_RESULTS)
         finally:
             await controller.terminate()
@@ -573,6 +577,7 @@ class ControllerConfigRobustnessTests(unittest.IsolatedAsyncioTestCase):
                     "enable_saucenao": True,
                     "enable_google_lens": False,
                     "enable_ascii2d": False,
+                    "enable_yandex": False,
                     "saucenao_similarity_threshold": "40",
                     "saucenao_numres": "9",
                 },
@@ -624,6 +629,7 @@ class ControllerImageIdTests(unittest.IsolatedAsyncioTestCase):
                     "enable_saucenao": False,
                     "enable_google_lens": False,
                     "enable_ascii2d": False,
+                    "enable_yandex": False,
                 }
             },
         )

@@ -11,7 +11,7 @@
 |---|---|
 | 找图 | Pixiv 插画、小说、画师、排行榜、Fanbox、订阅、随机推送；搜图神器主图源加 Bing 补充；SerpApi Google Images 文字搜图 |
 | 精确挑图 | Bot 可指定 `pixiv`、`soutu`、`serpapi`，或选 `auto`；支持候选拼图交给视觉模型审核，来源失败按顺序回退 |
-| 以图搜图 | SauceNAO、Google Lens、Ascii2d；支持附图、回复图片、先发指令后补图、会话图片上下文和 LLM 自主选择图片 |
+| 以图搜图 | SauceNAO、Google Lens、Ascii2d、Yandex；支持附图、回复图片、先发指令后补图、会话图片上下文和 LLM 自主选择图片 |
 | 可控性 | 两个模块、所有搜索源、每个 Pixiv 功能组、每个反搜引擎、指令、LLM 工具、审核、回退、上传和图片上下文都有独立开关 |
 
 ## 安装
@@ -30,7 +30,7 @@ python -m playwright install chromium
 ## 快速开始
 
 1. 打开插件配置，按需要开启“找图模块”和“以图搜图模块”。
-2. 配置至少一个来源的凭据：Pixiv Refresh Token、SerpApi Key、SauceNAO Key 或 Ascii2d Cookie。
+2. 按需配置来源凭据：Pixiv Refresh Token、SerpApi Key、SauceNAO Key 或 Ascii2d Cookie；Yandex 不需要 API Key，直接开启即可尝试。
 3. 使用 `/aa` 查看当前启用状态与常用命令。
 
 ```text
@@ -51,7 +51,7 @@ python -m playwright install chromium
 | `/aa找 <关键词>` | 自动选择来源找图，失败时按配置回退 |
 | `/aa神 <关键词>` | 仅优先使用搜图神器来源 |
 | `/aaS <关键词>` | 仅优先使用 SerpApi Google Images |
-| `/aa溯 [saucenao,google,ascii2d]` | 以图搜图；也可写 `/aa溯 出处`、`/aa溯 相似图`、`/aa溯 角色` 按意图选择引擎；可附图、回复图或随后补图 |
+| `/aa溯 [saucenao,google,ascii2d,yandex]` | 以图搜图；也可写 `/aa溯 出处`、`/aa溯 相似图`、`/aa溯 角色` 按意图选择引擎；可附图、回复图或随后补图 |
 
 ### Pixiv
 
@@ -130,10 +130,10 @@ python -m playwright install chromium
 
 - `enabled`、`commands_enabled`、`llm_tools_enabled`：分别控制模块、`/aa溯` 和模型工具；`inject_tool_guidance_enabled` 可单独关闭模型提示注入。
 - `ai_behavior.capture_image_context`：控制是否保存用户发图供 Bot 主动反搜；关闭后不会保留会话图片。
-- `strategies`：可独立启用 SauceNAO、Google Lens、Ascii2d。
+- `strategies`：可独立启用 SauceNAO、Google Lens、Ascii2d、Yandex；Yandex 还可设置抓取条数与 `.ru` 回退。
 - `network.allow_image_upload`：本地或平台临时图片无法直接给外部引擎时，是否上传到 Catbox 获取公开 URL；隐私敏感场景请关闭。
 - `network.allow_local_file_access`：默认关闭。保持关闭可避免模型利用路径读取并上传服务器本地文件。
-- `display.max_results`：每个反搜引擎的最大返回数；本版本已实际应用该限制。
+- `display.max_results`：跨引擎融合、去重和排序后的最终展示条数上限；各引擎内部抓取条数由各自策略配置控制。
 
 SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 列表为空，运行时会复用已填写的一侧。
 
@@ -205,6 +205,21 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 
 提示：Cookie 会过期。遇到 Ascii2d 403、验证失败或长期无结果时，重新按上面步骤获取即可。
 
+### Yandex Cookie（可选）
+
+用途：降低 Yandex 图片搜索触发地区限制或 CAPTCHA 的概率。Yandex 不要求 API Key；不填 Cookie 也会先尝试公开页面。
+
+填写位置：`reverse_image.api_keys.yandex_cookies`
+
+获取方法：
+
+1. 用 Chrome 或 Edge 打开 [Yandex Images](https://yandex.com/images/)，必要时先完成一次验证。
+2. 按 `F12` 打开开发者工具，进入 `Application` -> `Cookies`，选择 `https://yandex.com`（若实际使用 `.ru` 则选择 `https://yandex.ru`）。
+3. 复制浏览器请求里的完整 Cookie 字符串（格式如 `name=value; name2=value2`），粘贴到配置项。
+4. Cookie 等同登录态凭据，过期或失效时直接清空并重试公开访问即可。
+
+插件只把 Cookie 发给 Yandex 请求和 Yandex 自有缩略图域名，不会向搜索结果中的第三方网站转发；日志不会输出 Cookie 值。
+
 ### Fanbox Cookie
 
 用途：访问需要登录态或受限的 Fanbox 帖子内容。普通 Pixiv 插画搜索不需要它。
@@ -237,6 +252,7 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 | Pixiv 总是发同一张图 | 保持 `randomize_search_results` 和 `recent_dedup_enabled` 开启；需要更长记忆时提高 `recent_dedup_retention_days`。 |
 | 视觉审核回退到首图 | 当前模型不支持图片、审核超时或候选下载失败。可换视觉模型，或关闭 `fail_open` 让插件改用下一个来源；明确不匹配的候选在 `strict_match_enabled` 开启时不会发送。 |
 | Ascii2d 403 | 重新获取 Cookie，必要时使用代理。 |
+| Yandex 没有结果或出现 CAPTCHA | 先在配置中填写 `reverse_image.api_keys.yandex_cookies`，确认 `yandex_use_ru_fallback` 开启，并检查代理/地区网络；Yandex 页面结构变化时该策略会安全返回空结果，不会影响其它引擎。 |
 | 无法反搜本地图片 | 在隐私风险可接受时开启图片上传；需要读取服务器路径时还必须单独开启本地文件访问。 |
 
 ## 上游致谢
@@ -247,6 +263,8 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 - [674537331/astrbot_plugin_soutushenqi](https://github.com/674537331/astrbot_plugin_soutushenqi)
 - [monbed/astrbot_plugin_serpapi_imgsearch](https://github.com/monbed/astrbot_plugin_serpapi_imgsearch)
 - [iona-s/astrbot_plugin_imgexploration](https://github.com/iona-s/astrbot_plugin_imgexploration)
+
+Yandex 策略的接口选择与风控回退思路参考了 [OMSociety/astrbot_plugin_reverse_searcher](https://github.com/OMSociety/astrbot_plugin_reverse_searcher)，本项目为独立实现，未复制其代码。
 
 精确引用的上游 commit、修改范围和许可证兼容说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 

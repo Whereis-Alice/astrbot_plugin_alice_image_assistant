@@ -134,6 +134,26 @@ def coerce_int(
     return result
 
 
+def coerce_bool(value: Any, default: bool = False) -> bool:
+    """将 WebUI / YAML 中的布尔配置安全地归一化.
+
+    配置文件被手动编辑或经 WebUI 传输后，布尔值偶尔会变成 ``"false"``、
+    ``"0"`` 这样的字符串。直接调用 ``bool(value)`` 会把它们都当成 True，
+    因此只接受明确的真假字面量，无法判断时回退到默认值。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1", "yes", "y", "on", "enable", "enabled"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", "disable", "disabled"}:
+            return False
+    return default
+
+
 def set_proxy_url(proxy_url: str | None) -> None:
     """设置全局代理 URL.
 

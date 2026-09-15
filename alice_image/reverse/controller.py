@@ -29,6 +29,7 @@ from .constant import (
     DEFAULT_SAUCENAO_NUMRES,
     DEFAULT_SAUCENAO_SIMILARITY_THRESHOLD,
     DEFAULT_TOTAL_TIMEOUT_SECONDS,
+    DEFAULT_YANDEX_MAX_RESULTS,
     MAX_TOTAL_TIMEOUT_SECONDS,
     MIN_TOTAL_TIMEOUT_SECONDS,
     REVERSE_SEARCH_COMMAND_NAMES,
@@ -44,6 +45,7 @@ from .service import AliceImageReverseService
 from .strategy import ImageSearchStrategy
 from .utils import (
     close_aiohttp_session,
+    coerce_bool,
     coerce_int,
     get_bot_api,
     get_http_image_url,
@@ -54,6 +56,7 @@ from .utils import (
     set_proxy_url,
     set_user_agent,
 )
+from .yandex_strategy import YandexStrategy
 
 _DEFAULT_IMAGE_WAIT_TIMEOUT_SECONDS = 60
 _MIN_IMAGE_WAIT_TIMEOUT_SECONDS = 30
@@ -92,7 +95,7 @@ class AliceReverseController:
     功能:
     - 命令消息附图或回复图片消息发送 "/搜图" 触发搜索
     - 无图命令可等待同一发送者随后发送图片
-    - 支持 SauceNAO、Google Lens、Ascii2d 搜索引擎
+    - 支持 SauceNAO、Google Lens、Ascii2d、Yandex 搜索引擎
     - aiocqhttp 平台使用合并转发消息展示结果
     - 其他平台使用单条消息链展示结果
     - 支持 LLM 工具调用，让 AI 帮助用户搜图
@@ -336,6 +339,34 @@ class AliceReverseController:
         else:
             logger.info("[AliceImageReverse] Ascii2d 策略已禁用")
 
+        # Yandex Images：不要求 API Key；可选 Cookie 用于降低风控，.com 被拦截时
+        # 默认回退到 .ru。Yandex 无法提供真实相似度，策略内部按结果位次折算分数。
+        enable_yandex = coerce_bool(strategies_config.get("enable_yandex", True), True)
+        yandex_max_results = coerce_int(
+            strategies_config.get("yandex_max_results", DEFAULT_YANDEX_MAX_RESULTS),
+            DEFAULT_YANDEX_MAX_RESULTS,
+            1,
+            30,
+        )
+        yandex_use_ru_fallback = coerce_bool(
+            strategies_config.get("yandex_use_ru_fallback", True), True
+        )
+        yandex_cookies = api_keys_config.get("yandex_cookies", "")
+        if enable_yandex:
+            self.strategies.append(
+                YandexStrategy(
+                    cookies=yandex_cookies,
+                    max_results=yandex_max_results,
+                    use_ru_fallback=yandex_use_ru_fallback,
+                )
+            )
+            logger.info(
+                "[AliceImageReverse] 已加载 Yandex 策略"
+                + ("（已配置 Cookie）" if yandex_cookies else "")
+            )
+        else:
+            logger.info("[AliceImageReverse] Yandex 策略已禁用")
+
         logger.info(f"[AliceImageReverse] 共加载 {len(self.strategies)} 个搜图策略")
 
         if len(self.strategies) == 0:
@@ -572,7 +603,7 @@ class AliceReverseController:
 
         Args:
             image_index(int): Fallback image index. -1 = most recent image, 1 = first/oldest image.
-            strategies(string): Optional. Comma-separated strategy list: saucenao/sauce, google, ascii2d/2d.
+            strategies(string): Optional. Comma-separated strategy list: saucenao/sauce, google, ascii2d/2d, yandex.
             image_id(string): Optional stable image ID returned by get_session_images. Higher priority than image_index.
             intent(string): Optional natural-language intent such as "找出处", "找相似图", or "看角色".
                 Used only when strategies is omitted; an explicit strategy list always wins.
@@ -769,6 +800,7 @@ class AliceReverseController:
         - 搜图 saucenao: 只使用 SauceNAO 搜索
         - 搜图 google: 只使用 Google Lens 搜索
         - 搜图 ascii2d: 只使用 Ascii2d 搜索
+        - 搜图 yandex: 只使用 Yandex 搜索
         - 搜图 saucenao,google: 使用多个指定策略
         - 搜图 出处 / 相似图 / 角色: 按自然语言意图选择一个最合适的已加载策略
 
@@ -778,7 +810,8 @@ class AliceReverseController:
         if not self.strategies:
             yield event.plain_result(
                 "没有可用的搜图 API，请检查配置。\n"
-                "需要在 WebUI 中配置至少一个搜图引擎的 API Key。"
+                "SauceNAO、Google Lens、Ascii2d 需要凭据；Yandex 无需 API Key，"
+                "可直接开启后重试。"
             )
             return
 

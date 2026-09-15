@@ -491,7 +491,7 @@ class AliceImageAssistantPlugin(Star):
                 "不确定引擎时可留空并填写 intent：查出处/作者/Pixiv 用‘找出处’，"
                 "找相似或同款用‘找相似图’，看动漫插画来源用‘动漫图’，"
                 "找原图网页用‘找原图’。intent 只会在已配置的 SauceNAO、Google Lens、"
-                "Ascii2d 中选择，无法识别时保持全部并行。"
+                "Ascii2d、Yandex 中选择，无法识别时保持全部并行。"
             )
 
         if guidance_parts:

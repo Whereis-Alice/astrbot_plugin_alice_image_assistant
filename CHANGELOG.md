@@ -1,5 +1,12 @@
 # 更新日志
 
+## v1.8.0 - 2026-09-15
+
+- 新增 Yandex 图片反搜策略：通过公开图片搜索页面解析 `initialState.cbirSites.sites`，不需要 API Key；支持可选 Cookie、`.com -> .ru` 回退、CAPTCHA/页面结构异常降级和缩略图下载。
+- Yandex 接入统一的跨引擎去重、位次评分、Dashboard 策略选择和自然语言意图路由；“找相似图”会优先尝试 Yandex，再按可用引擎回退。
+- 配置面板新增 `enable_yandex`、`yandex_max_results`、`yandex_use_ru_fallback` 与敏感字段 `yandex_cookies`；补充解析脏数据、限量、Cookie 脱敏和回退测试。AnimeTrace 仍不加入本插件。
+- Yandex 的独立实现参考了 [OMSociety/astrbot_plugin_reverse_searcher](https://github.com/OMSociety/astrbot_plugin_reverse_searcher) 的公开使用思路，未复制其代码或引入 pyquery 依赖。
+
 ## v1.7.0 - 2026-09-15
 
 - 借鉴同类反搜插件的“按意图选择引擎”交互思路，独立加入现有反搜系统：`/aa溯 出处`、`/aa溯 相似图`、`/aa溯 角色` 等自然语言参数会在已加载的 SauceNAO、Google Lens、Ascii2d 中选择更合适的一条；LLM 工具 `alice_image_reverse_search` 新增可选 `intent` 参数。

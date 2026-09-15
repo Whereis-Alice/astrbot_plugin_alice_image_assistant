@@ -7,6 +7,7 @@ from astrbot_plugin_alice_image_assistant.alice_image.reverse.routing import (
 )
 
 AVAILABLE = ("SauceNAO", "Google Lens", "Ascii2d")
+AVAILABLE_WITH_YANDEX = (*AVAILABLE, "Yandex")
 
 
 class ReverseIntentRoutingTests(unittest.TestCase):
@@ -58,6 +59,17 @@ class ReverseIntentRoutingTests(unittest.TestCase):
 
         self.assertEqual(route.category, "similar")
         self.assertEqual(route.strategy_names, ("Google Lens",))
+
+    def test_similarity_intent_prefers_yandex_when_available(self) -> None:
+        route = route_intent("找相似图", AVAILABLE_WITH_YANDEX)
+
+        self.assertEqual(route.strategy_names, ("Yandex",))
+
+    def test_yandex_alias_can_be_selected_explicitly(self) -> None:
+        route = route_intent("yandex images", AVAILABLE_WITH_YANDEX)
+
+        self.assertEqual(route.category, "explicit")
+        self.assertEqual(route.strategy_names, ("Yandex",))
 
 
 if __name__ == "__main__":
