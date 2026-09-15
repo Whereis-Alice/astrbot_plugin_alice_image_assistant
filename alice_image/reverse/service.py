@@ -21,6 +21,7 @@ from .constant import (
 )
 from .models import ExplorationResult, SearchResultItem
 from .ranking import merge_and_rank
+from .routing import IntentRoute, route_intent
 from .strategy import ImageSearchStrategy
 from .utils import coerce_int, download_bytes
 
@@ -69,6 +70,14 @@ class AliceImageReverseService:
             策略名称列表
         """
         return [s.get_service_name() for s in self.strategies]
+
+    def resolve_intent(self, intent: str | None) -> IntentRoute:
+        """根据自然语言意图选择当前已加载的一个反查策略。
+
+        为空或无法识别时返回空路由，调用方应继续使用原有的全策略并行行为。
+        """
+
+        return route_intent(intent, self.get_available_strategies())
 
     def resolve_strategy_names(
         self, names: list[str] | None

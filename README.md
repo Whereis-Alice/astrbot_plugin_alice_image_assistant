@@ -51,7 +51,7 @@ python -m playwright install chromium
 | `/aa找 <关键词>` | 自动选择来源找图，失败时按配置回退 |
 | `/aa神 <关键词>` | 仅优先使用搜图神器来源 |
 | `/aaS <关键词>` | 仅优先使用 SerpApi Google Images |
-| `/aa溯 [saucenao,google,ascii2d]` | 以图搜图；可附图、回复图或随后补图 |
+| `/aa溯 [saucenao,google,ascii2d]` | 以图搜图；也可写 `/aa溯 出处`、`/aa溯 相似图`、`/aa溯 角色` 按意图选择引擎；可附图、回复图或随后补图 |
 
 ### Pixiv
 
@@ -104,7 +104,7 @@ python -m playwright install chromium
 | `alice_image_find` | 文字找图。模型可指定 `auto`、`pixiv`、`soutu` 或 `serpapi`；如需锁定 Pixiv 画师，可填写 `artist_name` 或 `pixiv_user_id`。 |
 | `alice_image_pixiv_novel` | 搜索或下载 Pixiv 小说。 |
 | `alice_image_list_session_images` | 列出当前会话可用于反搜的图片和稳定 `image_id`。 |
-| `alice_image_reverse_search` | 按 `image_id` 或索引以图搜图。 |
+| `alice_image_reverse_search` | 按 `image_id` 或索引以图搜图；可用 `strategies` 显式指定引擎，或用 `intent` 表达“找出处 / 找相似图 / 看角色”等意图。 |
 
 找图工具会自行发送图片，并向模型返回结构化结果。`auto` 对二次元、插画、日文标签等按 Pixiv → 搜图神器 → SerpApi 尝试；普通实体和真实照片按搜图神器 → SerpApi → Pixiv 尝试。是否继续回退由配置决定，模型不需要也不应该虚构图片链接。
 

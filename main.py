@@ -407,6 +407,7 @@ class AliceImageAssistantPlugin(Star):
         image_id: str | None,
         image_index: int,
         strategies: str | None,
+        intent: str | None = None,
     ) -> str:
         if self.reverse is None or not self.reverse_config.get(
             "reverse_tool_enabled", True
@@ -420,6 +421,7 @@ class AliceImageAssistantPlugin(Star):
             image_index=image_index,
             strategies=strategies,
             image_id=image_id,
+            intent=intent,
         )
 
     async def tool_pixiv_novel(
@@ -484,6 +486,13 @@ class AliceImageAssistantPlugin(Star):
                     "用户要求查最近一张图片来源时，直接调用 alice_image_reverse_search；"
                     "需要选择更早的图片时使用 image_index。"
                 )
+            guidance_parts.append(
+                "alice_image_reverse_search 的 strategies 显式指定引擎时优先使用它；"
+                "不确定引擎时可留空并填写 intent：查出处/作者/Pixiv 用‘找出处’，"
+                "找相似或同款用‘找相似图’，看动漫插画来源用‘动漫图’，"
+                "找原图网页用‘找原图’。intent 只会在已配置的 SauceNAO、Google Lens、"
+                "Ascii2d 中选择，无法识别时保持全部并行。"
+            )
 
         if guidance_parts:
             guidance = f"\n{marker}\n" + "\n".join(guidance_parts) + "\n"
@@ -515,7 +524,7 @@ class AliceImageAssistantPlugin(Star):
             "/aa找 <关键词>  自动找图\n"
             "/aaP <标签> [数量]  Pixiv 找图\n"
             "/aaP画师找 <画师>|<关键词> [数量]  指定画师找图\n"
-            "/aa溯 [引擎]   附图、回复图片或随后发图\n"
+            "/aa溯 [引擎/意图]   附图、回复图片或随后发图；如‘出处’‘相似图’\n"
             "/aaP帮助       查看 Pixiv 全部指令"
         )
         yield event.plain_result(text)

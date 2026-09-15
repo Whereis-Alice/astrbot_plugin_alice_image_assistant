@@ -564,6 +564,7 @@ class AliceReverseController:
         image_index: int = -1,
         strategies: str | None = None,
         image_id: str | None = None,
+        intent: str | None = None,
     ) -> str:
         """Search for the source of an image.
 
@@ -573,6 +574,8 @@ class AliceReverseController:
             image_index(int): Fallback image index. -1 = most recent image, 1 = first/oldest image.
             strategies(string): Optional. Comma-separated strategy list: saucenao/sauce, google, ascii2d/2d.
             image_id(string): Optional stable image ID returned by get_session_images. Higher priority than image_index.
+            intent(string): Optional natural-language intent such as "找出处", "找相似图", or "看角色".
+                Used only when strategies is omitted; an explicit strategy list always wins.
 
         Returns:
             JSON result with search results. You MUST present the results to the user with URLs and titles.
@@ -632,10 +635,14 @@ class AliceReverseController:
                 ensure_ascii=False,
             )
 
-        # 解析策略参数
+        # 解析策略参数。显式策略优先；没有显式策略时才借助自然语言意图
+        # 选择一个最合适的已加载引擎，未知意图继续保持历史上的“全部并行”行为。
         strategy_names = None
+        selection_mode = "all"
+        intent_route = None
         if strategies and strategies.strip():
             strategy_names = [s.strip() for s in strategies.split(",") if s.strip()]
+            selection_mode = "explicit"
 
         available_strategies = self.service.get_available_strategies()
 
@@ -652,11 +659,28 @@ class AliceReverseController:
                     ensure_ascii=False,
                 )
 
+        requested_intent = str(intent or "").strip()
+        if not strategy_names and requested_intent:
+            intent_route = self.service.resolve_intent(requested_intent)
+            if intent_route.category == "explicit" and not intent_route.strategy_names:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"意图指定的策略不可用: {requested_intent}",
+                        "available_strategies": available_strategies,
+                    },
+                    ensure_ascii=False,
+                )
+            if intent_route.recognized and intent_route.strategy_names:
+                strategy_names = list(intent_route.strategy_names)
+                selection_mode = "intent"
+
         logger.info(
             f"[AliceImageReverse] AI 工具调用搜图: {http_url}, "
             f"选择方式: {selected_by}, "
             f"可用策略: {available_strategies}, "
-            f"指定策略: {strategy_names or '全部'}"
+            f"策略选择: {strategy_names or '全部'}, "
+            f"意图: {requested_intent or '未指定'}"
         )
 
         # 执行搜索
@@ -723,6 +747,9 @@ class AliceReverseController:
                 "used_strategies": strategy_names
                 if strategy_names
                 else available_strategies,
+                "selection_mode": selection_mode,
+                "intent": requested_intent or None,
+                "intent_route": intent_route.to_dict() if intent_route else None,
                 "selected_by": selected_by,
                 "message_sent": not silent_mode,
                 "instruction": instruction,
@@ -743,8 +770,9 @@ class AliceReverseController:
         - 搜图 google: 只使用 Google Lens 搜索
         - 搜图 ascii2d: 只使用 Ascii2d 搜索
         - 搜图 saucenao,google: 使用多个指定策略
+        - 搜图 出处 / 相似图 / 角色: 按自然语言意图选择一个最合适的已加载策略
 
-        别名: sauce=saucenao, 2d=ascii2d
+        别名: sauce=saucenao, 2d=ascii2d；显式策略优先于意图路由。
         """
         # 检查是否有可用策略
         if not self.strategies:
@@ -767,15 +795,19 @@ class AliceReverseController:
 
         available_strategies = self.service.get_available_strategies()
 
-        # 验证策略是否存在
+        # 验证策略是否存在；单个未知参数也可以是自然语言意图。
         if strategy_names:
             _, not_found = self.service.resolve_strategy_names(strategy_names)
             if not_found:
-                yield event.plain_result(
-                    f"以下策略不可用: {', '.join(not_found)}\n"
-                    f"当前可用策略: {', '.join(available_strategies)}"
-                )
-                return
+                intent_route = self.service.resolve_intent(args_str)
+                if intent_route.recognized and intent_route.strategy_names:
+                    strategy_names = list(intent_route.strategy_names)
+                else:
+                    yield event.plain_result(
+                        f"以下策略不可用: {', '.join(not_found)}\n"
+                        f"也无法识别为搜图意图；当前可用策略: {', '.join(available_strategies)}"
+                    )
+                    return
 
         # 优先使用当前消息的图片，如果没有再检查回复消息
         messages = event.get_messages()

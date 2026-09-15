@@ -93,7 +93,8 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
     description: str = (
         "查找用户已发送图片的来源。若 alice_image_list_session_images 可用，先查看图片并"
         "优先用稳定的 image_id 选择目标；否则可直接搜索最新图片或使用 image_index。"
-        "支持 SauceNAO、Google Lens 和 Ascii2d。"
+        "支持 SauceNAO、Google Lens 和 Ascii2d；可以用 intent 表达‘找出处/找相似图/看角色’，"
+        "让插件在已配置的引擎中选择更合适的一条。"
     )
     parameters: dict[str, Any] = Field(
         default_factory=lambda: {
@@ -111,6 +112,10 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
                     "type": "string",
                     "description": "可选，逗号分隔：saucenao,google,ascii2d。留空使用全部。",
                 },
+                "intent": {
+                    "type": "string",
+                    "description": "可选，自然语言意图，如‘找出处’、‘找相似图’、‘看这个角色’。仅在未指定 strategies 时生效。",
+                },
             },
         }
     )
@@ -126,6 +131,7 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
         return await self.plugin.tool_reverse_image(
             event=event,
             image_id=kwargs.get("image_id"),
+            intent=kwargs.get("intent"),
             image_index=kwargs.get("image_index", -1),
             strategies=kwargs.get("strategies"),
         )

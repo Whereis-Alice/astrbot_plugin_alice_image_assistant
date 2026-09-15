@@ -154,6 +154,8 @@ class ConfigAndToolTests(unittest.TestCase):
         find_properties = tools[0].parameters["properties"]
         self.assertIn("artist_name", find_properties)
         self.assertIn("pixiv_user_id", find_properties)
+        reverse_properties = tools[3].parameters["properties"]
+        self.assertIn("intent", reverse_properties)
 
     def test_no_upstream_public_command_or_tool_identifiers_remain(self) -> None:
         source = (PLUGIN_ROOT / "main.py").read_text("utf-8")
