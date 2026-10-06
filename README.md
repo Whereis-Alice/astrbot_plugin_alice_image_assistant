@@ -27,11 +27,11 @@ python -m playwright install chromium
 
 插件要求 AstrBot `>=4.16,<5`，建议使用支持 Function Calling 的模型；启用视觉审核时，所选模型还必须支持图片输入。
 
-### 更新到 v2.0.0
+### 更新到 v2.0.1
 
-在 AstrBot 的插件管理中更新“爱丽丝的图片助手”，然后重载插件或重启 AstrBot。也可从本仓库的 [v2.0.0 Release](https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant/releases/tag/v2.0.0) 获取源码包。
+在 AstrBot 的插件管理中更新“爱丽丝的图片助手”，然后重载插件或重启 AstrBot。也可从本仓库的 [v2.0.1 Release](https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant/releases/tag/v2.0.1) 获取源码包。
 
-本版将全部 48 条公开指令改为中文，旧 `aa` / `aaP` / `aaF` 命令不再注册；更新后发送 `/图片帮助`，Pixiv 详细用法见 `/插画帮助`。凭据、订阅和运行数据继续沿用；人格、快捷回复中的旧命令需要同步替换。自主识图升级后默认不发结果卡片，详见下方“LLM 工具”。完整变化见 [CHANGELOG.md](CHANGELOG.md)。
+从 v2.0.0 起全部 48 条公开指令改为中文，旧 `aa` / `aaP` / `aaF` 命令不再注册；更新后发送 `/图片帮助`，Pixiv 详细用法见 `/插画帮助`。凭据、订阅和运行数据继续沿用；人格、快捷回复中的旧命令需要同步替换。自主识图升级后默认不发结果卡片，详见下方“LLM 工具”。完整变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 快速开始
 
@@ -46,6 +46,7 @@ python -m playwright install chromium
 ```
 
 `/识图` 可和图片同发、回复一条图片使用，或先发指令后在限定时间内补发图片。
+多个引擎可用空格、逗号、顿号或分号分隔，例如 `/识图 google yandex`、`/识图 google，saucenao`。
 
 ## 指令
 
@@ -152,6 +153,13 @@ python -m playwright install chromium
 反搜工具可为图片问题主动检索。先从 `alice_image_list_session_images` 取得目标 `image_id`，再调用 `alice_image_reverse_search`；不指定目标或使用失效 ID 会返回选图错误，不会偷偷改查最新图片。
 
 反搜的发送行为由可选参数 `send_results` 控制：省略时遵循配置（默认静默），`false` 强制静默，`true` 请求发送结果卡片。静默检索只把证据交给模型组织回答，手动 `/识图` 不受影响。旧 `llm_tool_silent_mode` 已被新配置替代。
+
+**推荐配置：文字找图发图片开启，以图识图发结果卡片关闭。** 两者各管一个工具，不存在覆盖关系：
+
+| 配置位置 | 控制的行为 | 推荐值 |
+|---|---|---|
+| 找图模块 → 文字找图：将找到的图片发到聊天（`find_image.tool_send_images`） | “帮我找张风景图”时，`alice_image_find` 把找到的图片发出来 | 开 |
+| 以图搜图模块 → 图片上下文与工具行为 → 以图识图：默认将搜索结果卡片发到聊天（`reverse_image.ai_behavior.llm_tool_send_results_default`） | 分析你发来的图片时，`alice_image_reverse_search` 是否额外展示检索卡片；显式发送参数优先 | 关 |
 
 模型收到的证据包含每个来源的标题、摘要、链接、缩略图 URL，以及内部视觉核对的画面对应关系；不会返回图片二进制。网页标题可能与配图无关，排序分也不是识别正确率。视觉核对会区分拼图区域，无法核验时明确返回未核验状态。同一消息下的重复检索会短时复用结果；它能减少线索丢失和重复调用，但不保证每张图都能找到正确出处。
 
@@ -307,7 +315,7 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 | Pixiv 总是发同一张图 | 保持 `randomize_search_results` 和 `recent_dedup_enabled` 开启；需要更长记忆时提高 `recent_dedup_retention_days`。 |
 | 视觉审核回退到首图 | 当前模型不支持图片、审核超时或候选下载失败。可换视觉模型，或关闭 `fail_open` 让插件改用下一个来源；明确不匹配的候选在 `strict_match_enabled` 开启时不会发送。 |
 | Ascii2d 403 | 重新获取 Cookie，必要时使用代理。 |
-| Yandex 没有结果或出现 CAPTCHA | 先在配置中填写 `reverse_image.api_keys.yandex_cookies`，确认 `yandex_use_ru_fallback` 开启，并检查代理/地区网络；Yandex 页面结构变化时该策略会安全返回空结果，不会影响其它引擎。 |
+| Yandex 没有结果或出现 CAPTCHA | 先在配置中填写 `reverse_image.api_keys.yandex_cookies`，确认 `yandex_use_ru_fallback` 开启，并检查代理/地区网络；验证页或页面结构变化会报告该引擎暂不可用，不会丢掉其它引擎的结果。 |
 | 无法反搜本地图片 | 在隐私风险可接受时开启图片上传；需要读取服务器路径时还必须单独开启本地文件访问。 |
 
 ## 上游致谢

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -52,6 +53,8 @@ from .utils import (
     get_bot_api,
     get_http_image_url,
     is_aiocqhttp_platform,
+    normalize_credential,
+    normalize_credentials,
     retain_aiohttp_session,
     set_allow_image_upload,
     set_allow_local_file_access,
@@ -95,7 +98,7 @@ class AliceReverseController:
     """图片搜索插件.
 
     功能:
-    - 命令消息附图或回复图片消息发送 "/搜图" 触发搜索
+    - 命令消息附图或回复图片消息发送 "/识图" 触发搜索
     - 无图命令可等待同一发送者随后发送图片
     - 支持 SauceNAO、Google Lens、Ascii2d、Yandex 搜索引擎
     - aiocqhttp 平台使用合并转发消息展示结果
@@ -276,7 +279,7 @@ class AliceReverseController:
             1,
             30,
         )
-        sauce_nao_key = api_keys_config.get("saucenao_api_key", "")
+        sauce_nao_key = normalize_credential(api_keys_config.get("saucenao_api_key"))
         if enable_saucenao and sauce_nao_key:
             self.strategies.append(
                 SauceNaoStrategy(
@@ -295,7 +298,7 @@ class AliceReverseController:
 
         # Google Lens (SerpAPI)
         enable_google_lens = strategies_config.get("enable_google_lens", True)
-        serpapi_keys = api_keys_config.get("serpapi_keys", [])
+        serpapi_keys = normalize_credentials(api_keys_config.get("serpapi_keys"))
         google_lens_max_results = coerce_int(
             strategies_config.get(
                 "google_lens_max_results", DEFAULT_GOOGLE_LENS_MAX_RESULTS
@@ -324,8 +327,8 @@ class AliceReverseController:
 
         # Ascii2d
         enable_ascii2d = strategies_config.get("enable_ascii2d", True)
-        ascii2d_session_id = api_keys_config.get("ascii2d_session_id", "")
-        ascii2d_cf_clearance = api_keys_config.get("ascii2d_cf_clearance", "")
+        ascii2d_session_id = normalize_credential(api_keys_config.get("ascii2d_session_id"))
+        ascii2d_cf_clearance = normalize_credential(api_keys_config.get("ascii2d_cf_clearance"))
         ascii2d_max_results = coerce_int(
             strategies_config.get("ascii2d_max_results", DEFAULT_ASCII2D_MAX_RESULTS),
             DEFAULT_ASCII2D_MAX_RESULTS,
@@ -479,6 +482,10 @@ class AliceReverseController:
                 state.resolve(_ImageWaitOutcome.TIMED_OUT)
             else:
                 state.resolve(_ImageWaitSubmission(event=event, image=image))
+                # A manually awaited image belongs to this command, not normal chat.
+                stop_event = getattr(event, "stop_event", None)
+                if callable(stop_event):
+                    stop_event()
 
     async def _await_image_wait(
         self,
@@ -516,6 +523,8 @@ class AliceReverseController:
     def _get_raw_image_urls(
         cls,
         event: AstrMessageEvent,
+        *,
+        first_only: bool = False,
     ) -> list[str]:
         """从结构化原始事件提取图片 URL"""
         message_obj = getattr(event, "message_obj", None)
@@ -532,11 +541,13 @@ class AliceReverseController:
             if not isinstance(segment, Mapping) or segment.get("type") != "image":
                 continue
             data = segment.get("data")
-            if not isinstance(data, Mapping):
-                continue
-            url = cls._as_http_image_url(data.get("url"))
-            if url is not None:
-                urls.append(url)
+            if isinstance(data, Mapping):
+                url = cls._as_http_image_url(data.get("url"))
+                if url is not None:
+                    urls.append(url)
+            # 首个图片段缺 URL 时也必须停止，不能误用第二张图。
+            if first_only:
+                break
         return urls
 
     # ==================================================================
@@ -703,7 +714,7 @@ class AliceReverseController:
         selection_mode = "all"
         intent_route = None
         if strategies and strategies.strip():
-            strategy_names = [s.strip() for s in strategies.split(",") if s.strip()]
+            strategy_names = self._split_strategy_names(strategies)
             selection_mode = "explicit"
 
         available_strategies = self.service.get_available_strategies()
@@ -780,6 +791,7 @@ class AliceReverseController:
                     "success": False,
                     "error": "搜索服务暂时不可用" if result.all_failed else "本次未获得可用图片来源，不能据此确认或否定图片内容",
                     "failed_strategies": result.failed_strategies,
+                    "notices": result.notices,
                     "cache_hit": cache_hit,
                     "message_sent": False,
                 }, ensure_ascii=False
@@ -808,6 +820,7 @@ class AliceReverseController:
                 "items": evidence_payload(cached.items),
                 "visual_evidence": cached.visual,
                 "failed_strategies": result.failed_strategies,
+                "notices": result.notices,
                 "cache_hit": cache_hit,
                 "target": {"image_id": image_id, "image_index": image_index},
                 "available_strategies": available_strategies,
@@ -829,6 +842,12 @@ class AliceReverseController:
     # ==================================================================
     # Command Handlers
     # ==================================================================
+
+    @staticmethod
+    def _split_strategy_names(value: str) -> list[str]:
+        # Keep the canonical multi-word engine name usable as well as its alias.
+        value = re.sub(r"google\s+lens", "google", value, flags=re.IGNORECASE)
+        return [part for part in re.split(r"[\s,，、;；]+", value.strip()) if part]
 
     async def search_image_cmd(self, event: AstrMessageEvent):
         """搜图指令 - 附带、回复或随后发送一张图片进行搜索
@@ -862,7 +881,7 @@ class AliceReverseController:
         # 解析策略参数
         strategy_names = None
         if args_str:
-            strategy_names = [s.strip() for s in args_str.split(",") if s.strip()]
+            strategy_names = self._split_strategy_names(args_str)
 
         available_strategies = self.service.get_available_strategies()
 
@@ -974,10 +993,12 @@ class AliceReverseController:
         """执行命令搜图；成功时返回 None，否则返回用户提示"""
         await event.send(event.plain_result("搜索中..."))
 
-        http_sources, other_sources = self._partition_image_sources(
-            image_source,
-            *self._get_raw_image_urls(event),
-        )
+        # Raw fallback is only valid for the first image of this message, never a reply
+        # image or a later attachment. Preprocessing may have replaced its URL with a file.
+        messages = event.get_messages() if callable(getattr(event, "get_messages", None)) else []
+        first_image = next((comp for comp in messages if isinstance(comp, Image)), None)
+        raw_urls = self._get_raw_image_urls(event, first_only=True) if image_source is first_image else []
+        http_sources, other_sources = self._partition_image_sources(image_source, *raw_urls)
         image_url = http_sources[0] if http_sources else None
         if image_url is None:
             for source in other_sources:
@@ -996,11 +1017,15 @@ class AliceReverseController:
             strategy_names=strategy_names,
         )
 
+        notices = list(result.notices)
+        if result.failed_strategies:
+            notices.append(f"暂时不可用的引擎：{'、'.join(result.failed_strategies)}")
         if not result.items:
-            return "未找到相关图片来源，请尝试更换图片或稍后重试。"
-
-        await self._send_search_results(event, result.items)
-        return None
+            notices.append("搜索服务暂时不可用，请稍后重试。" if result.all_failed
+                           else "本次未找到达到筛选条件的图片来源，不能据此判断图片没有出处。")
+        else:
+            await self._send_search_results(event, result.items)
+        return "\n".join(notices) or None
 
     @classmethod
     async def _get_image_from_reply(

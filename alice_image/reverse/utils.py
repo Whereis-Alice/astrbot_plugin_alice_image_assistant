@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import url2pathname
 
 import aiohttp
 from astrbot.api import logger
@@ -18,6 +19,7 @@ from astrbot.api import logger
 from .constant import DEFAULT_USER_AGENT, HTTP_TIMEOUT_SECONDS, IMAGE_DOWNLOAD_TIMEOUT
 
 # Catbox 图床 URL
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 # 全局共享的 aiohttp ClientSession
 _aiohttp_session: aiohttp.ClientSession | None = None
@@ -49,54 +51,42 @@ SENSITIVE_QUERY_PARAMS = frozenset(
         "auth",
         "access_token",
         "apikey",
+        "rkey",
+        "sig",
+        "signature",
+        "x-amz-signature",
     }
 )
 
 
 def _sanitize_url_for_logging(url: str) -> str:
-    """清理 URL 中的敏感信息，用于日志输出.
-
-    隐藏敏感查询参数的值，只显示参数名。
-
-    Args:
-        url: 原始 URL
-
-    Returns:
-        清理后的 URL，适合日志输出
-    """
+    """Remove URL userinfo, encoded credential queries and fragments."""
     if not url:
         return url
-
     try:
-        # 分离 URL 的各个部分
-        if "?" not in url:
-            return url
+        parts = urlsplit(url)
+        hostname = parts.hostname or ""
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        netloc = hostname + (f":{parts.port}" if parts.port else "")
+        query = urlencode([(key, "[REDACTED]" if key.lower() in SENSITIVE_QUERY_PARAMS else value)
+                           for key, value in parse_qsl(parts.query, keep_blank_values=True)])
+        return urlunsplit((parts.scheme, netloc, parts.path, query, ""))
+    except ValueError:
+        return "<invalid URL>"
 
-        base, query = url.split("?", 1)
-        if "#" in query:
-            query, fragment = query.split("#", 1)
-            fragment = "#" + fragment
-        else:
-            fragment = ""
 
-        # 处理查询参数
-        params = query.split("&")
-        sanitized_params = []
-        for param in params:
-            if "=" in param:
-                key, _ = param.split("=", 1)
-                if key.lower() in SENSITIVE_QUERY_PARAMS:
-                    # 隐藏敏感参数值
-                    sanitized_params.append(f"{key}=***REDACTED***")
-                else:
-                    sanitized_params.append(param)
-            else:
-                sanitized_params.append(param)
+def normalize_credential(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
-        return f"{base}?{'&'.join(sanitized_params)}{fragment}"
-    except Exception:
-        # 如果解析失败，返回一个安全的占位符
-        return "<URL removed for security>"
+
+def normalize_credentials(value: Any) -> list[str]:
+    """Accept pasted strings or lists; trim blanks, discard invalid entries and duplicates."""
+    if isinstance(value, str):
+        value = re.split(r"[\s,，]+", value)
+    if not isinstance(value, (list, tuple)):
+        return []
+    return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
 
 
 def coerce_int(
@@ -167,7 +157,7 @@ def set_proxy_url(proxy_url: str | None) -> None:
         and proxy_url.startswith(("http://", "https://"))
     ):
         _proxy_url = proxy_url.strip()
-        logger.info(f"[AliceImageReverse] 已设置代理: {_proxy_url}")
+        logger.info(f"[AliceImageReverse] 已设置代理: {_sanitize_url_for_logging(_proxy_url)}")
     else:
         _proxy_url = None
         logger.debug("[AliceImageReverse] 未设置有效代理，将直接连接")
@@ -313,7 +303,7 @@ async def download_bytes(
     timeout: int = IMAGE_DOWNLOAD_TIMEOUT,
     headers: dict[str, str] | None = None,
     *,
-    max_bytes: int = 20 * 1024 * 1024,
+    max_bytes: int = MAX_IMAGE_BYTES,
 ) -> bytes | None:
     """下载指定 URL 的内容并返回字节数据.
 
@@ -351,7 +341,7 @@ async def download_bytes(
                 return bytes(data)
     except Exception as e:
         logger.debug(
-            f"[AliceImageReverse] 下载失败: {_sanitize_url_for_logging(url)}, 错误: {e}"
+            f"[AliceImageReverse] 下载失败: {_sanitize_url_for_logging(url)}, 错误: {type(e).__name__}"
         )
 
     return None
@@ -403,19 +393,38 @@ def get_bot_api(event: Any) -> Any | None:
     return getattr(event, "bot", None)
 
 
-def _read_file_bytes(file_path: str) -> bytes:
-    """读取本地文件字节数据（用于 to_thread 调用）.
+def _read_file_bytes(file_path: str | Path) -> bytes | None:
+    path = Path(file_path)
+    if not path.is_file() or path.stat().st_size > MAX_IMAGE_BYTES:
+        return None
+    with path.open("rb") as stream:
+        data = stream.read(MAX_IMAGE_BYTES + 1)
+    return data if len(data) <= MAX_IMAGE_BYTES else None
 
-    使用上下文管理器确保文件句柄正确关闭。
 
-    Args:
-        file_path: 文件路径
+def _local_image_path(source: str) -> Path | None:
+    if source.startswith("file://"):
+        parts = urlsplit(source)
+        if re.fullmatch(r"[A-Za-z]:", parts.netloc):
+            raw = parts.netloc + parts.path
+        elif parts.netloc.lower() in {"", "localhost"}:
+            raw = parts.path
+        else:
+            return None
+        raw = url2pathname(raw)
+    else:
+        raw = source
+    if raw.startswith(("\\\\", "//")) or "\x00" in raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else None
 
-    Returns:
-        文件字节数据
-    """
-    with Path(file_path).open("rb") as f:
-        return f.read()
+
+def _decode_image_base64(value: str) -> bytes | None:
+    if len(value) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
+        return None
+    decoded = base64.b64decode(value)
+    return decoded if len(decoded) <= MAX_IMAGE_BYTES else None
 
 
 async def read_image_bytes(source: str) -> bytes | None:
@@ -462,28 +471,20 @@ async def read_image_bytes(source: str) -> bytes | None:
             )
             return None
 
-        # 解析文件路径
-        if source.startswith("file://"):
-            file_path = source[7:]  # 去掉 file:// 前缀
-            # 处理 Windows 路径 (file:///C:/...)
-            if file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
-                file_path = file_path[1:]  # 去掉开头的 /
-        else:
-            file_path = source
-
         try:
-            if await asyncio.to_thread(os.path.exists, file_path):
+            file_path = _local_image_path(source)
+            if file_path is not None:
                 return await asyncio.to_thread(_read_file_bytes, file_path)
         except Exception as e:
-            logger.debug(f"[AliceImageReverse] 读取本地文件失败: 错误: {e}")
+            logger.debug(f"[AliceImageReverse] 读取本地文件失败: 错误: {type(e).__name__}")
         return None
 
     # base64:// 格式
     if source.startswith("base64://"):
         try:
-            return base64.b64decode(source[9:])
+            return _decode_image_base64(source[9:])
         except Exception as e:
-            logger.debug(f"[AliceImageReverse] base64 解码失败: {e}")
+            logger.debug(f"[AliceImageReverse] base64 解码失败: {type(e).__name__}")
         return None
 
     # data:image/...;base64,... 格式
@@ -492,9 +493,9 @@ async def read_image_bytes(source: str) -> bytes | None:
         match = re.match(r"data:image/\w+;base64,(.+)", source)
         if match:
             try:
-                return base64.b64decode(match.group(1))
+                return _decode_image_base64(match.group(1))
             except Exception as e:
-                logger.debug(f"[AliceImageReverse] data URI 解码失败: {e}")
+                logger.debug(f"[AliceImageReverse] data URI 解码失败: {type(e).__name__}")
         return None
 
     return None
@@ -548,14 +549,13 @@ async def upload_image(image_bytes: bytes) -> str | None:
                 # Catbox 直接返回图片 URL
                 if url and url.startswith("https://"):
                     return url.strip()
-                logger.warning(f"[AliceImageReverse] Catbox 返回异常: {url}")
+                logger.warning("[AliceImageReverse] Catbox 返回无效 URL")
             else:
-                text = await resp.text()
                 logger.warning(
-                    f"[AliceImageReverse] Catbox 上传失败: HTTP {resp.status}, {text}"
+                    f"[AliceImageReverse] Catbox 上传失败: HTTP {resp.status}"
                 )
     except Exception as e:
-        logger.error(f"[AliceImageReverse] Catbox 上传异常: {e}")
+        logger.error(f"[AliceImageReverse] Catbox 上传异常: {type(e).__name__}")
 
     return None
 

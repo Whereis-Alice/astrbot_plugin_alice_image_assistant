@@ -1573,13 +1573,15 @@ function reverseResultNodes(data) {
   const results = Array.isArray(data.results) ? data.results : [];
   const list = results.length
     ? el("div", { class: "stack tight" }, results.map(reverseResultItem))
-    : emptyBox("compass", "没有匹配到来源", "可以换个策略组合，或换一张更清晰的原图");
+    : emptyBox("compass", data.all_failed ? "搜索服务暂时不可用" : "未获得符合条件的来源",
+      data.all_failed ? "请查看策略错误，检查凭据与网络后重试" : "请查看筛选提示，或换个策略组合继续查证");
   const fold = foldList("策略错误", data.errors, { level: "err" });
+  const notices = foldList("筛选与检索提示", data.notices, { level: "warn" });
   return [card({
     eyebrow: "MATCHES",
     icon: "compass",
     title: "溯源结果 · " + results.length + " 条",
-    desc: "相似度条按后端给出的 score 绘制",
+    desc: "条形分数仅用于候选排序，不代表识别正确率",
     actions: [textButton("undo", "清空结果", () => {
       state.reverse.data = null;
       state.reverse.error = null;
@@ -1591,6 +1593,7 @@ function reverseResultNodes(data) {
         pill("策略 " + activeStrategies().length, "info", "layers"),
       ]),
       list,
+      notices,
       fold,
     ].filter(Boolean),
   })];

@@ -159,10 +159,8 @@ class YandexAsyncTests(unittest.IsolatedAsyncioTestCase):
             return_value=_BrokenSession(),
         ), patch(
             "astrbot_plugin_alice_image_assistant.alice_image.reverse.yandex_strategy.logger.warning"
-        ) as warning:
-            self.assertEqual(
-                await strategy.search("https://input.example/image.jpg"), []
-            )
+        ) as warning, self.assertRaisesRegex(RuntimeError, "Yandex 请求失败"):
+            await strategy.search("https://input.example/image.jpg")
 
         messages = " ".join(str(call.args[0]) for call in warning.call_args_list)
         self.assertNotIn("secret-cookie", messages)

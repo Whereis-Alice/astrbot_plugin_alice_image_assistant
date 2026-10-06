@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import aiohttp
@@ -18,7 +19,7 @@ from .constant import (
     SAUCENAO_BASE_URL,
     SOURCE_KEY_SAUCENAO,
 )
-from .models import SearchResultItem
+from .models import ProviderSearchError, ProviderSearchOutcome, SearchResultItem
 from .strategy import ImageSearchStrategy
 from .utils import coerce_int, get_aiohttp_session, get_proxy_url, get_user_agent
 
@@ -42,7 +43,7 @@ class SauceNaoStrategy(ImageSearchStrategy):
             similarity_threshold: 相似度阈值 (0-100)，低于此值的结果将被过滤
             max_results: 单次请求返回条数 (numres)
         """
-        self.api_key = api_key
+        self.api_key = api_key.strip() if isinstance(api_key, str) else ""
         # WebUI 保存的数值配置可能是字符串，直接 max/min 会抛 TypeError 导致插件初始化失败，
         # 因此统一先强制转换再夹取范围。
         self.similarity_threshold = coerce_int(
@@ -53,7 +54,7 @@ class SauceNaoStrategy(ImageSearchStrategy):
     def get_service_name(self) -> str:
         return "SauceNAO"
 
-    async def search(self, image_url: str) -> list[SearchResultItem]:
+    async def search(self, image_url: str) -> list[SearchResultItem] | ProviderSearchOutcome:
         """执行 SauceNAO 图片搜索.
 
         Args:
@@ -64,11 +65,10 @@ class SauceNaoStrategy(ImageSearchStrategy):
         """
         if not self.api_key:
             logger.warning("[SauceNAO] 未配置 API Key，跳过搜索")
-            return []
+            raise ProviderSearchError("未配置 SauceNAO Key")
 
         if not image_url.startswith(("http://", "https://")):
-            logger.warning(f"[SauceNAO] 不支持的图片格式: {image_url}")
-            return []
+            raise ProviderSearchError("SauceNAO 仅支持 HTTP 图片 URL")
 
         results: list[SearchResultItem] = []
 
@@ -98,42 +98,55 @@ class SauceNaoStrategy(ImageSearchStrategy):
             ) as resp:
                 if resp.status != 200:
                     logger.error(f"[SauceNAO] API 请求失败: HTTP {resp.status}")
-                    return results
+                    raise ProviderSearchError(f"SauceNAO HTTP {resp.status}")
 
                 text = await resp.text()
                 json_data = json.loads(text)
 
-                # 检查是否有错误
-                if "results" not in json_data:
-                    # 检查是否是错误响应
-                    if "header" in json_data:
-                        header = json_data["header"]
-                        status = header.get("status", 0)
-                        if status != 0:
-                            message = header.get("message", "未知错误")
-                            logger.error(f"[SauceNAO] API 错误: {message}")
-                    return results
-
-                nodes = json_data["results"]
+                if not isinstance(json_data, dict):
+                    raise ProviderSearchError("SauceNAO 响应不是对象")
+                header = json_data.get("header", {})
+                if not isinstance(header, dict) or str(header.get("status", 0)) != "0":
+                    # API message may echo credentials; never log or return it.
+                    raise ProviderSearchError("SauceNAO API 返回错误")
+                nodes = json_data.get("results", [])
                 if not isinstance(nodes, list):
-                    logger.error("[SauceNAO] API 返回的 results 不是列表，已忽略")
-                    return results
+                    raise ProviderSearchError("SauceNAO results 不是列表")
 
+                filtered = 0
                 for node in nodes:
                     # 每条结果单独 try：单条脏数据 (similarity 为 None/dict 等) 只跳过它自己，
                     # 而不是让异常逃到外层 except 把后续结果全部静默截断。
                     try:
+                        if self._similarity(node) < self.similarity_threshold:
+                            filtered += 1
+                            continue
                         item = self._parse_node(node)
                     except (TypeError, ValueError) as e:
-                        logger.warning(f"[SauceNAO] 跳过无法解析的结果项: {e}")
+                        logger.warning(f"[SauceNAO] 跳过无法解析的结果项: {type(e).__name__}")
                         continue
                     if item is not None:
                         results.append(item)
+                if nodes and filtered == len(nodes):
+                    return ProviderSearchOutcome(notices=[
+                        f"SauceNAO 的 {filtered} 条候选均低于 {self.similarity_threshold}% 相似度阈值，已过滤；不代表图片没有出处。"
+                    ])
 
+        except ProviderSearchError:
+            raise
         except Exception as e:
-            logger.error(f"[SauceNAO] 搜索失败: {e}")
+            raise ProviderSearchError(f"SauceNAO 请求失败：{type(e).__name__}") from e
 
         return results
+
+    @staticmethod
+    def _similarity(node: Any) -> float:
+        if not isinstance(node, dict) or not isinstance(node.get("header"), dict):
+            raise TypeError("无效的 SauceNAO 结果项")
+        similarity = float(node["header"].get("similarity", 0) or 0)
+        if not math.isfinite(similarity) or not 0 <= similarity <= 100:
+            raise ValueError("无效的相似度")
+        return similarity
 
     def _parse_node(self, node: Any) -> SearchResultItem | None:
         """解析单条 SauceNAO 结果.
@@ -157,7 +170,7 @@ class SauceNaoStrategy(ImageSearchStrategy):
         data_section = data_section if isinstance(data_section, dict) else {}
 
         # similarity 可能是 None/dict，float() 会抛 TypeError，交由调用方逐条捕获
-        similarity = float(header.get("similarity", 0) or 0)
+        similarity = self._similarity(node)
 
         # 相似度阈值过滤：阈值越低结果越多，但误命中也越多
         if similarity < self.similarity_threshold:
@@ -173,7 +186,7 @@ class SauceNaoStrategy(ImageSearchStrategy):
         ext_url = ""
         if isinstance(ext_urls, list):
             for candidate in ext_urls:
-                if isinstance(candidate, str) and candidate.strip():
+                if isinstance(candidate, str) and candidate.strip().startswith(("https://", "http://")):
                     ext_url = candidate.strip()
                     break
         if not ext_url:
@@ -193,7 +206,7 @@ class SauceNaoStrategy(ImageSearchStrategy):
             similarity=f"{similarity:.2f}%",
             description=None,
             domain=None,
-            # score 是跨引擎统一的归一化置信度，SauceNAO 直接用相似度百分比换算
+            # 相似度归一化后参与排序，不是识别正确率。
             score=max(0.0, min(1.0, similarity / 100.0)),
             source_key=SOURCE_KEY_SAUCENAO,
         )

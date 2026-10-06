@@ -25,7 +25,7 @@ from .constant import (
     SOURCE_KEY_ASCII2D_BOVW,
     SOURCE_KEY_ASCII2D_COLOR,
 )
-from .models import SearchResultItem
+from .models import ProviderSearchError, ProviderSearchOutcome, SearchResultItem
 from .ranking import dedupe_by_url, positional_score
 from .strategy import ImageSearchStrategy
 from .utils import coerce_int, get_proxy_url
@@ -87,8 +87,8 @@ class Ascii2dStrategy(ImageSearchStrategy):
             cf_clearance: Cloudflare cf_clearance Cookie 值，用于绕过 CF 验证
             max_results: 单次搜索返回条数 (bovw + color 去重后)
         """
-        self.session_id = session_id or ""
-        self.cf_clearance = cf_clearance or ""
+        self.session_id = session_id.strip() if isinstance(session_id, str) else ""
+        self.cf_clearance = cf_clearance.strip() if isinstance(cf_clearance, str) else ""
         # WebUI 传来的数值可能是字符串，先强制转换再夹取，避免初始化期崩溃
         self.max_results = coerce_int(max_results, DEFAULT_ASCII2D_MAX_RESULTS, 1, 20)
         # 共享的 curl_cffi AsyncSession，避免重复创建连接
@@ -159,7 +159,7 @@ class Ascii2dStrategy(ImageSearchStrategy):
     def get_service_name(self) -> str:
         return "Ascii2d"
 
-    async def search(self, image_url: str) -> list[SearchResultItem]:
+    async def search(self, image_url: str) -> list[SearchResultItem] | ProviderSearchOutcome:
         """执行 Ascii2d 搜索.
 
         Args:
@@ -170,14 +170,14 @@ class Ascii2dStrategy(ImageSearchStrategy):
         """
         if not image_url.startswith(("http://", "https://")):
             logger.warning("[Ascii2d] 仅支持 HTTP URL")
-            return []
+            raise ProviderSearchError("Ascii2d 仅支持 HTTP 图片 URL")
 
         try:
             # 步骤 1: 获取 authenticity_token (命中缓存时不再请求主页)
             token = await self._fetch_authenticity_token()
             if not token:
                 logger.error("[Ascii2d] 获取 token 失败")
-                return []
+                raise ProviderSearchError("Ascii2d 获取 token 失败")
 
             # 步骤 2: 提交搜索请求，获取结果页 URL
             result_url = await self._post_url_search(image_url, token)
@@ -189,25 +189,48 @@ class Ascii2dStrategy(ImageSearchStrategy):
                 )
             if not result_url:
                 logger.error("[Ascii2d] 搜索请求失败")
-                return []
+                raise ProviderSearchError("Ascii2d 搜索请求失败")
 
             # 步骤 3: 并行获取 color 和 bovw 结果
             color_results, bovw_results = await asyncio.gather(
                 self._fetch_and_parse_result_page(result_url, is_bovw=False),
                 self._fetch_and_parse_result_page(result_url, is_bovw=True),
+                return_exceptions=True,
             )
+
+            notices = []
+            pages = []
+            for name, page in (("特征", bovw_results), ("颜色", color_results)):
+                if isinstance(page, asyncio.CancelledError):
+                    raise page
+                if isinstance(page, BaseException):
+                    notices.append(f"Ascii2d {name}结果页暂时不可用，已保留另一页的可用结果。")
+                else:
+                    pages.extend(page)
+            if len(notices) == 2:
+                raise ProviderSearchError("Ascii2d 两个结果页均失败")
 
             # 合并结果：bovw (特征匹配) 比 color (配色匹配) 可信，放在前面；
             # 两种模式的命中高度重叠，必须按规范化 URL 去重，否则展示位被重复项吃光。
-            combined = dedupe_by_url([*bovw_results, *color_results])
+            combined = dedupe_by_url(pages)
             final_results = combined[: self.max_results]
 
             logger.info(f"[Ascii2d] 搜索完成，获取 {len(final_results)} 条结果")
-            return final_results
+            return ProviderSearchOutcome(final_results, notices) if notices else final_results
 
+        except ProviderSearchError:
+            raise
         except Exception as e:
-            logger.error(f"[Ascii2d] 搜索异常: {e}")
-            return []
+            raise ProviderSearchError(f"Ascii2d 请求失败：{type(e).__name__}") from e
+
+    @staticmethod
+    def _is_result_url(url: str) -> bool:
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            return (parsed.scheme in {"https", "http"} and parsed.hostname == "ascii2d.net"
+                    and bool(re.fullmatch(r"/search/(?:color|bovw)/[^/]+/?", parsed.path)))
+        except ValueError:
+            return False
 
     async def fetch_thumbnail(self, url: str) -> bytes | None:
         """下载 Ascii2d 缩略图.
@@ -239,7 +262,7 @@ class Ascii2dStrategy(ImageSearchStrategy):
                 return None
             return response.content
         except Exception as e:
-            logger.debug(f"[Ascii2d] 缩略图下载异常: {e}")
+            logger.debug(f"[Ascii2d] 缩略图下载异常: {type(e).__name__}")
             return None
 
     async def _fetch_authenticity_token(
@@ -298,14 +321,14 @@ class Ascii2dStrategy(ImageSearchStrategy):
             if response.status_code != 200:
                 logger.warning(f"[Ascii2d] 获取主页失败: HTTP {response.status_code}")
                 logger.debug(
-                    f"[Ascii2d] 响应内容: {response.text[:500] if response.text else 'empty'}"
+                    "[Ascii2d] 主页返回异常响应"
                 )
                 return None
 
             html = response.text
 
         except Exception as e:
-            logger.error(f"[Ascii2d] 获取主页异常: {e}")
+            logger.error(f"[Ascii2d] 获取主页异常: {type(e).__name__}")
             return None
 
         # 解析 token - 尝试多种模式
@@ -326,7 +349,7 @@ class Ascii2dStrategy(ImageSearchStrategy):
         logger.warning(
             "[Ascii2d] 未找到 authenticity_token，可能网页结构已变化或 Session ID 无效"
         )
-        logger.debug(f"[Ascii2d] HTML 片段: {html[:500] if html else 'empty'}")
+        logger.debug("[Ascii2d] 响应缺少预期页面标记")
         return None
 
     async def _post_url_search(self, image_url: str, token: str) -> str | None:
@@ -370,22 +393,22 @@ class Ascii2dStrategy(ImageSearchStrategy):
             if response.status_code == 200:
                 final_url = str(response.url)
                 # 验证是否跳转到结果页
-                if "/search/color/" in final_url or "/search/bovw/" in final_url:
-                    logger.info(f"[Ascii2d] 搜索成功，结果页: {final_url}")
+                if self._is_result_url(final_url):
+                    logger.info("[Ascii2d] 搜索已进入结果页")
                     return final_url
                 # 落在非结果页 (如被打回首页) 时返回该 URL，后续 color/bovw 两路会
                 # 抓同一个页面并产出完全重复的结果，因此直接判定为失败。
-                logger.warning(f"[Ascii2d] 重定向到非结果页，已放弃: {final_url}")
+                logger.warning("[Ascii2d] 重定向到非结果页，已放弃")
                 return None
 
             logger.warning(f"[Ascii2d] POST 失败: HTTP {response.status_code}")
             logger.debug(
-                f"[Ascii2d] POST 响应: {response.text[:500] if response.text else 'empty'}"
+                "[Ascii2d] POST 返回异常响应"
             )
             return None
 
         except Exception as e:
-            logger.error(f"[Ascii2d] POST 请求异常: {e}")
+            logger.error(f"[Ascii2d] POST 请求异常: {type(e).__name__}")
             return None
 
     async def _fetch_and_parse_result_page(
@@ -432,14 +455,16 @@ class Ascii2dStrategy(ImageSearchStrategy):
             )
 
             if response.status_code != 200:
-                logger.warning(f"[Ascii2d] 获取结果页失败: HTTP {response.status_code}")
-                return []
+                raise ProviderSearchError(f"Ascii2d 结果页 HTTP {response.status_code}")
+            if not self._is_result_url(str(response.url)):
+                raise ProviderSearchError("Ascii2d 结果页发生异常重定向")
 
             html = response.text
 
+        except ProviderSearchError:
+            raise
         except Exception as e:
-            logger.error(f"[Ascii2d] 获取结果页异常: {e}")
-            return []
+            raise ProviderSearchError(f"Ascii2d 结果页失败：{type(e).__name__}") from e
 
         source_key = SOURCE_KEY_ASCII2D_BOVW if is_bovw else SOURCE_KEY_ASCII2D_COLOR
         return self._parse_ascii2d_html(html, source_key)
@@ -463,7 +488,7 @@ class Ascii2dStrategy(ImageSearchStrategy):
             try:
                 triple = cls._parse_item_box(box)
             except Exception as e:
-                logger.debug(f"[Ascii2d] 解析单个 item 失败: {e}")
+                logger.debug(f"[Ascii2d] 解析单个 item 失败: {type(e).__name__}")
                 continue
             # triple 为 None 表示这个 box 里没有任何外站链接。
             # 查询原图块正是这种"只有自站链接/没有链接"的块，按内容特征识别比

@@ -19,7 +19,7 @@ from .constant import (
     MIN_TOTAL_TIMEOUT_SECONDS,
     STRATEGY_ALIAS_MAP,
 )
-from .models import ExplorationResult, SearchResultItem
+from .models import ExplorationResult, ProviderSearchOutcome, SearchResultItem
 from .ranking import merge_and_rank
 from .routing import IntentRoute, route_intent
 from .strategy import ImageSearchStrategy
@@ -116,7 +116,7 @@ class AliceImageReverseService:
 
     async def _run_strategy(
         self, strategy: ImageSearchStrategy, image_url: str
-    ) -> list[SearchResultItem]:
+    ) -> ProviderSearchOutcome:
         """执行单个策略并施加总超时.
 
         超时只掐掉当前策略，其它策略的结果照常保留，避免一个慢引擎
@@ -144,11 +144,12 @@ class AliceImageReverseService:
             logger.error(f"[AliceImageReverse] 策略 [{name}] 执行失败: {type(e).__name__}")
             raise
 
-        if not isinstance(items, list):
+        outcome = items if isinstance(items, ProviderSearchOutcome) else ProviderSearchOutcome(items=items)
+        if not isinstance(outcome.items, list):
             logger.warning(f"[AliceImageReverse] 策略 [{name}] 返回了非列表结果，已忽略")
             raise TypeError("搜索策略返回值必须为列表")
         # 引擎自身已有抓取上限。不要再用聊天展示上限提前裁掉给模型的线索。
-        return items[:30]
+        return ProviderSearchOutcome(items=outcome.items[:30], notices=outcome.notices)
 
     async def explore(
         self,
@@ -204,6 +205,7 @@ class AliceImageReverseService:
             # 聚合结果
             all_items: list[SearchResultItem] = []
             failed_strategies: list[str] = []
+            notices: list[str] = []
             for index, result in enumerate(results_list):
                 if isinstance(result, asyncio.CancelledError):
                     raise result
@@ -214,7 +216,10 @@ class AliceImageReverseService:
                         f"[{strategies_to_use[index].get_service_name()}] 异常: {type(result).__name__}"
                     )
                     continue
-                all_items.extend(result)
+                all_items.extend(result.items)
+                for notice in result.notices:
+                    if notice not in notices:
+                        notices.append(notice)
 
             # 先跨引擎融合排序去重，再按展示上限截断，保证高置信度结果不被挤掉
             evidence_items = merge_and_rank(all_items, 0)
@@ -236,6 +241,7 @@ class AliceImageReverseService:
                 items=items, evidence_items=evidence_items,
                 attempted_strategies=[s.get_service_name() for s in strategies_to_use],
                 failed_strategies=failed_strategies,
+                notices=notices,
             )
 
         except Exception as e:

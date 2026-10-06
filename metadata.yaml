@@ -2,7 +2,7 @@ name: astrbot_plugin_alice_image_assistant
 display_name: 爱丽丝的图片助手
 short_desc: 48 条中文指令 + Dashboard WebUI，支持精确找图与静默识图。
 desc: 让 Bot 自主找图、视觉挑图和静默查证图片来源；48 条直白中文指令，内置 6 套主题的 Dashboard WebUI，可直接配置、试跑找图与溯源。
-version: v2.0.0
+version: v2.0.1
 author: Whereis-Alice
 repo: https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant
 astrbot_version: ">=4.16,<5"

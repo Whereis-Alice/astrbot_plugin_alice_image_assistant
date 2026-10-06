@@ -17,14 +17,19 @@ from .constant import (
     DEFAULT_GOOGLE_LENS_MAX_RESULTS,
     HTTP_TIMEOUT_SECONDS,
     SERPAPI_BASE_URL,
-    SERPAPI_KEY_PENALTY_SECONDS,
     SOURCE_KEY_GOOGLE_LENS,
     SOURCE_KEY_GOOGLE_LENS_EXACT,
 )
-from .models import SearchResultItem
+from .models import ProviderSearchError, SearchResultItem
 from .ranking import dedupe_by_url, positional_score
 from .strategy import ImageSearchStrategy
-from .utils import coerce_bool, coerce_int, get_aiohttp_session, get_proxy_url
+from .utils import (
+    coerce_bool,
+    coerce_int,
+    get_aiohttp_session,
+    get_proxy_url,
+    normalize_credentials,
+)
 
 # 额度缓存 TTL（秒）
 QUOTA_CACHE_TTL = 60
@@ -36,7 +41,7 @@ class SerpApiQuotaExhaustedError(RuntimeError):
     def __init__(self, api_key: str, status: int | None = None) -> None:
         self.api_key = api_key
         self.status = status
-        super().__init__(f"SerpAPI key exhausted: ...{api_key[-4:]} (status={status})")
+        super().__init__(f"SerpAPI key unavailable (status={status})")
 
 
 class GoogleLensStrategy(ImageSearchStrategy):
@@ -62,7 +67,7 @@ class GoogleLensStrategy(ImageSearchStrategy):
             api_keys: SerpAPI API Key 列表，支持多 Key 负载均衡
             max_results: 去重后单次取用的匹配条数
         """
-        self.api_keys = api_keys or []
+        self.api_keys = normalize_credentials(api_keys)
         # WebUI 传来的数值可能是字符串，先强制转换再夹取，避免初始化期崩溃
         self.max_results = coerce_int(max_results, DEFAULT_GOOGLE_LENS_MAX_RESULTS, 1, 30)
         self.search_type = search_type if search_type in {"all", "exact_matches", "visual_matches", "products"} else "all"
@@ -73,9 +78,6 @@ class GoogleLensStrategy(ImageSearchStrategy):
         self._key_lock = asyncio.Lock()
         # 额度缓存: {api_key: (searches_left, timestamp)}
         self._quota_cache: dict[str, tuple[int, float]] = {}
-        # 失败 Key 的短时惩罚: {api_key: 冷却截止时间戳}
-        # 只惩罚不拉黑：网络抖动导致的失败不应该让 Key 永久不可用
-        self._key_penalty_until: dict[str, float] = {}
 
     def get_service_name(self) -> str:
         return "Google Lens"
@@ -91,40 +93,23 @@ class GoogleLensStrategy(ImageSearchStrategy):
         """
         if not self.api_keys:
             logger.warning("[GoogleLens] 未配置 SerpAPI Key，跳过搜索")
-            return []
+            raise ProviderSearchError("未配置 Google Lens Key")
 
         if not image_url.startswith(("http://", "https://")):
             logger.warning("[GoogleLens] SerpAPI 不支持本地文件")
-            return []
+            raise ProviderSearchError("Google Lens 仅支持 HTTP 图片 URL")
 
-        # 尝试所有可用的 API Key
-        last_exception: Exception | None = None
-        for attempt in range(len(self.api_keys)):
+        # Only key-specific errors justify another key; network/server failures do not.
+        for _ in range(len(self.api_keys)):
             try:
                 return await self._search_with_key(image_url)
-            except SerpApiQuotaExhaustedError as e:
-                logger.warning(
-                    f"[GoogleLens] Key ...{e.api_key[-4:]} 额度已耗尽，"
-                    f"尝试使用下一个可用 Key (尝试 {attempt + 1}/{len(self.api_keys)})"
-                )
-                # 继续尝试下一个 key
-                continue
-            except Exception as e:
-                # 记录异常但继续尝试其他 key
-                logger.warning(
-                    f"[GoogleLens] Key 尝试失败 (尝试 {attempt + 1}/{len(self.api_keys)}): {type(e).__name__}"
-                )
-                last_exception = e
-                continue
-
-        # 所有 Key 都失败
-        if last_exception:
-            logger.error(
-                f"[GoogleLens] 所有 API Key 均失败，最后错误类型: {type(last_exception).__name__}"
-            )
-        else:
-            logger.error("[GoogleLens] 所有 API Key 已耗尽")
-        raise RuntimeError("Google Lens 搜索服务不可用")
+            except SerpApiQuotaExhaustedError as exc:
+                if not exc.api_key:
+                    break
+                logger.warning("[GoogleLens] 当前 Key 鉴权或额度受限，尝试其它 Key")
+            except Exception as exc:
+                raise ProviderSearchError(f"Google Lens 搜索服务不可用：{type(exc).__name__}") from exc
+        raise ProviderSearchError("Google Lens 搜索服务不可用：没有剩余的可用 Key")
 
     async def _search_with_key(self, image_url: str) -> list[SearchResultItem]:
         """使用当前选中的 Key 执行搜索.
@@ -143,18 +128,7 @@ class GoogleLensStrategy(ImageSearchStrategy):
         if not api_key:
             raise SerpApiQuotaExhaustedError("", status=None)
 
-        logger.info(f"[GoogleLens] 使用 Key ...{api_key[-4:]} 开始搜索")
-
-        try:
-            return await self._request_with_key(api_key, image_url)
-        except SerpApiQuotaExhaustedError:
-            # 额度耗尽已经通过 _quota_cache 记录，无需重复惩罚
-            raise
-        except Exception:
-            # 非额度错误（超时、解析失败等）也要给该 Key 一段冷却，
-            # 否则外层重试会立刻再次挑到同一个坏 Key。
-            await self._penalize_key(api_key)
-            raise
+        return await self._request_with_key(api_key, image_url)
 
     async def _request_with_key(
         self, api_key: str, image_url: str
@@ -276,79 +250,20 @@ class GoogleLensStrategy(ImageSearchStrategy):
         return dedupe_by_url(results)[: self.max_results]
 
     async def _select_key_optimistically(self) -> str | None:
-        """乐观选择 API Key，不预先检查额度.
-
-        使用轮询方式选择 Key，额度错误在实际请求时处理。
-        使用缓存避免短时间内重复检查已知耗尽的 Key。
-
-        Returns:
-            可用的 API Key，如果没有则返回 None
-        """
+        """Round-robin valid keys without penalizing unrelated network failures."""
         if not self.api_keys:
             return None
-
         async with self._key_lock:
-            # 清理过期的缓存
-            now = time.time()
-            expired_keys = [
-                k
-                for k, (_, ts) in self._quota_cache.items()
-                if now - ts > QUOTA_CACHE_TTL
-            ]
-            for k in expired_keys:
-                del self._quota_cache[k]
-
-            # 清理过期的惩罚记录
-            expired_penalties = [
-                k for k, until in self._key_penalty_until.items() if until <= now
-            ]
-            for k in expired_penalties:
-                del self._key_penalty_until[k]
-
-            start_idx = self._current_key_index % len(self.api_keys)
-            penalized_fallback: tuple[int, str] | None = None
-
-            for i in range(len(self.api_keys)):
-                idx = (start_idx + i) % len(self.api_keys)
-                key = self.api_keys[idx]
-
-                # 检查缓存中是否有额度信息
-                cached = self._quota_cache.get(key)
-                if cached:
-                    searches_left, _ = cached
-                    if searches_left <= 0:
-                        continue  # 缓存显示已耗尽，跳过
-
-                if key in self._key_penalty_until:
-                    # 冷却中的 Key 先记下来，其它 Key 都不可用时再退回来用
-                    if penalized_fallback is None:
-                        penalized_fallback = (idx, key)
-                    continue
-
-                # 选中后游标必须前移到下一个 Key：原来置为 idx 会导致同一次搜图的
-                # 多轮重试反复挑到同一个坏 Key，多 Key 负载均衡完全失效。
-                self._current_key_index = idx + 1
-                return key
-
-            if penalized_fallback is not None:
-                idx, key = penalized_fallback
-                self._current_key_index = idx + 1
-                return key
-
+            now = time.monotonic()
+            self._quota_cache = {key: value for key, value in self._quota_cache.items()
+                                 if now - value[1] <= QUOTA_CACHE_TTL}
+            for _ in range(len(self.api_keys)):
+                index = self._current_key_index % len(self.api_keys)
+                self._current_key_index = index + 1
+                key = self.api_keys[index]
+                if self._quota_cache.get(key, (1, now))[0] > 0:
+                    return key
             return None
-
-    async def _penalize_key(self, api_key: str) -> None:
-        """给失败的 API Key 记一段短时冷却.
-
-        Args:
-            api_key: 失败的 API Key
-        """
-        async with self._key_lock:
-            self._key_penalty_until[api_key] = time.time() + SERPAPI_KEY_PENALTY_SECONDS
-            logger.debug(
-                f"[GoogleLens] Key ...{api_key[-4:]} 进入 "
-                f"{SERPAPI_KEY_PENALTY_SECONDS}s 冷却"
-            )
 
     async def _mark_key_exhausted(self, api_key: str) -> None:
         """标记 API Key 已耗尽.
@@ -357,5 +272,5 @@ class GoogleLensStrategy(ImageSearchStrategy):
             api_key: 已耗尽的 API Key
         """
         async with self._key_lock:
-            self._quota_cache[api_key] = (0, time.time())
-            logger.debug(f"[GoogleLens] 已标记 Key ...{api_key[-4:]} 为耗尽状态")
+            self._quota_cache[api_key] = (0, time.monotonic())
+            logger.debug("[GoogleLens] 已缓存 Key 的鉴权/额度受限状态")

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from .models import SearchResultItem
+from .models import ProviderSearchOutcome, SearchResultItem
 from .utils import download_bytes
 
 
@@ -26,7 +26,7 @@ class ImageSearchStrategy(ABC):
         """
 
     @abstractmethod
-    async def search(self, image_url: str) -> list[SearchResultItem]:
+    async def search(self, image_url: str) -> list[SearchResultItem] | ProviderSearchOutcome:
         """执行图片搜索.
 
         Args:

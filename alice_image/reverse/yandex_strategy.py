@@ -27,7 +27,7 @@ from .constant import (
     YANDEX_RU_BASE_URL,
     YANDEX_SEARCH_PATH,
 )
-from .models import SearchResultItem
+from .models import ProviderSearchError, SearchResultItem
 from .ranking import positional_score
 from .strategy import ImageSearchStrategy
 from .utils import (
@@ -101,8 +101,9 @@ class YandexStrategy(ImageSearchStrategy):
         """执行 Yandex 图片 URL 搜索。"""
         if not self._is_http_url(image_url):
             logger.warning("[Yandex] 仅支持 HTTP/HTTPS 图片 URL")
-            return []
+            raise ProviderSearchError("Yandex 仅支持 HTTP 图片 URL")
 
+        valid_response = False
         for index, origin in enumerate(self._candidate_origins()):
             try:
                 html, status = await self._request_html(origin, image_url)
@@ -129,14 +130,19 @@ class YandexStrategy(ImageSearchStrategy):
                     )
                 continue
 
+            if self._site_nodes(state) is None:
+                logger.warning("[Yandex] 结果状态无法解析，尝试备用站点")
+                continue
+            valid_response = True
             results = self._parse_state(state)
             if results or index == len(self._candidate_origins()) - 1:
                 logger.info(f"[Yandex] 搜索完成，获取 {len(results)} 条结果")
                 return results
-            # 有状态但 JSON 损坏时也允许 .com -> .ru 回退。
-            logger.warning(f"[Yandex] {self._host(origin)} 结果状态无法解析")
+            logger.info("[Yandex] 当前站点无匹配，尝试备用站点")
 
-        return []
+        if valid_response:
+            return []
+        raise ProviderSearchError("Yandex 请求失败、被验证页面拦截或页面结构已变化")
 
     async def _request_html(self, origin: str, image_url: str) -> tuple[str, int]:
         """请求一个 Yandex 站点并返回页面文本与 HTTP 状态。"""
@@ -197,24 +203,26 @@ class YandexStrategy(ImageSearchStrategy):
         parser = cls(max_results=max_results)
         return parser._parse_state(state)
 
-    def _parse_state(self, state: str) -> list[SearchResultItem]:
+    @classmethod
+    def _site_nodes(cls, state: str) -> list | None:
         try:
             payload: Any = json.loads(unescape(state))
         except (TypeError, ValueError):
-            return []
+            return None
 
-        initial_state = self._mapping_value(payload, "initialState")
+        initial_state = cls._mapping_value(payload, "initialState")
         # 少数页面会把 initialState 再包成 JSON 字符串。
         if isinstance(initial_state, str):
             try:
                 initial_state = json.loads(initial_state)
             except (TypeError, ValueError):
-                return []
-        cbir_sites = self._mapping_value(initial_state, "cbirSites")
-        sites = self._mapping_value(cbir_sites, "sites")
-        if not isinstance(sites, list):
-            return []
+                return None
+        cbir_sites = cls._mapping_value(initial_state, "cbirSites")
+        sites = cls._mapping_value(cbir_sites, "sites")
+        return sites if isinstance(sites, list) else None
 
+    def _parse_state(self, state: str) -> list[SearchResultItem]:
+        sites = self._site_nodes(state) or []
         candidates: list[dict[str, str | None]] = []
         seen_urls: set[str] = set()
         for site in sites:

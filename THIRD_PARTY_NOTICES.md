@@ -11,6 +11,8 @@
 
 v2.0.0 在本插件现有架构中实现独立的模型证据池、候选视觉核对和同轮工具缓存，继续允许模型为图片问题自主检索。没有采用上游要求用户明确提出反搜后才能调用工具的策略。
 
+v2.0.1 继续参考同一版本中的提供商结果/提示分离、失败与零匹配区分、多图 URL 配对、等待图片独占消费、参数分隔符、仅凭据问题换 Key、日志脱敏与本地文件读取处理，并适配至本插件的排序、缓存、Yandex 和 WebUI 流程。具体取舍见 [上游评估](docs/upstream-review-2026-10-06.md)。
+
 Yandex 策略的页面入口、Cookie 可选和 `.com -> .ru` 回退思路参考了
 [OMSociety/astrbot_plugin_reverse_searcher](https://github.com/OMSociety/astrbot_plugin_reverse_searcher)。
 本项目对 Yandex 的请求、HTML 状态解析、结果模型和安全处理均为独立实现，未复制该项目代码，

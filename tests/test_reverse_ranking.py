@@ -479,15 +479,13 @@ class SauceNaoParsingTests(unittest.IsolatedAsyncioTestCase):
         # 坏数据只跳过它自己，不能让异常逃到外层把后续结果全部静默截断
         self.assertEqual([r.url for r in results], ["https://a.test/1", "https://a.test/3"])
 
-    async def test_non_list_results_are_ignored(self) -> None:
+    async def test_non_list_results_are_failures(self) -> None:
         with patch(
             "astrbot_plugin_alice_image_assistant.alice_image.reverse."
             "sauce_nao_strategy.get_aiohttp_session",
             AsyncMock(return_value=_FakeSession({"results": "oops"})),
-        ):
-            results = await self.strategy.search("https://example.com/input.jpg")
-
-        self.assertEqual(results, [])
+        ), self.assertRaisesRegex(RuntimeError, "不是列表"):
+            await self.strategy.search("https://example.com/input.jpg")
 
 
 class GoogleLensKeyRotationTests(unittest.IsolatedAsyncioTestCase):
@@ -501,25 +499,24 @@ class GoogleLensKeyRotationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(first, second)
         self.assertEqual({first, second}, {"key-aaaa", "key-bbbb"})
 
-    async def test_penalized_key_is_skipped(self) -> None:
+    async def test_exhausted_key_is_skipped(self) -> None:
         strategy = GoogleLensStrategy(api_keys=["key-aaaa", "key-bbbb"])
-        await strategy._penalize_key("key-aaaa")
+        await strategy._mark_key_exhausted("key-aaaa")
 
         for _ in range(3):
             self.assertEqual(await strategy._select_key_optimistically(), "key-bbbb")
 
-    async def test_all_penalized_keys_still_yield_a_candidate(self) -> None:
+    async def test_all_exhausted_keys_do_not_send_more_requests(self) -> None:
         strategy = GoogleLensStrategy(api_keys=["key-aaaa", "key-bbbb"])
-        await strategy._penalize_key("key-aaaa")
-        await strategy._penalize_key("key-bbbb")
+        await strategy._mark_key_exhausted("key-aaaa")
+        await strategy._mark_key_exhausted("key-bbbb")
 
-        # 惩罚只是降级而不是拉黑，全部冷却时仍要给出一个 Key 而不是彻底不搜
-        self.assertIn(await strategy._select_key_optimistically(), strategy.api_keys)
+        self.assertIsNone(await strategy._select_key_optimistically())
 
     async def test_no_keys_returns_none(self) -> None:
         self.assertIsNone(await GoogleLensStrategy(api_keys=[])._select_key_optimistically())
 
-    async def test_failed_request_penalizes_the_key(self) -> None:
+    async def test_network_failure_does_not_exhaust_the_key(self) -> None:
         strategy = GoogleLensStrategy(api_keys=["key-aaaa", "key-bbbb"])
 
         async def _boom(_api_key: str, _image_url: str) -> list[SearchResultItem]:
@@ -529,7 +526,7 @@ class GoogleLensKeyRotationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await strategy._search_with_key("https://example.com/a.jpg")
 
-        self.assertEqual(len(strategy._key_penalty_until), 1)
+        self.assertEqual(strategy._quota_cache, {})
 
 
 def _event(session_id: str = "session-1") -> SimpleNamespace:

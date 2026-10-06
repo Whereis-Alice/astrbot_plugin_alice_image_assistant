@@ -1403,6 +1403,10 @@ class AliceWebService:
             )
 
         errors = [str(text) for text in (getattr(outcome, "errors", None) or [])]
+        notices = [str(text) for text in (getattr(outcome, "notices", None) or [])]
+        failed = getattr(outcome, "failed_strategies", None) or []
+        if failed:
+            errors.append(f"暂时不可用的引擎：{'、'.join(failed)}")
         if not_found:
             errors.append(f"忽略了无法识别的引擎：{'、'.join(not_found)}")
         return {
@@ -1410,6 +1414,8 @@ class AliceWebService:
             "image_url": image_url,
             "results": results,
             "errors": errors,
+            "notices": notices,
+            "all_failed": bool(getattr(outcome, "all_failed", False)),
             "counts": {"results": len(results)},
             "elapsed_ms": int((time.monotonic() - started) * 1000),
         }
