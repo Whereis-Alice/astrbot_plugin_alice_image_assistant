@@ -317,9 +317,6 @@ class UserHandler:
             help_text = get_help_message(
                 "pixiv_user_illusts", "用户作品帮助消息加载失败，请检查配置文件。"
             )
-            help_text = help_text.replace(
-                "`/aaP画师作 <用户ID>`", "`/aaP画师作 <用户ID> [数量]`"
-            )
             yield event.plain_result(help_text)
             return
 
@@ -380,8 +377,8 @@ class UserHandler:
         """从指定画师的近期作品池中随机发送作品。"""
         if not user_id.strip() or user_id.strip().lower() == "help":
             yield event.plain_result(
-                "用法: /aaP画师随 <用户ID> [数量]\n"
-                "示例: /aaP画师随 29872901 1\n"
+                "用法: /随机插画 <画师ID或名字> [数量]\n"
+                "示例: /随机插画 29872901 1\n"
                 "数量省略时使用配置中的指令默认返回作品数。"
             )
             return

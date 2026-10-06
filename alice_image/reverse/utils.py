@@ -312,6 +312,8 @@ async def download_bytes(
     url: str,
     timeout: int = IMAGE_DOWNLOAD_TIMEOUT,
     headers: dict[str, str] | None = None,
+    *,
+    max_bytes: int = 20 * 1024 * 1024,
 ) -> bytes | None:
     """下载指定 URL 的内容并返回字节数据.
 
@@ -339,7 +341,14 @@ async def download_bytes(
             url, timeout=client_timeout, headers=default_headers, proxy=proxy
         ) as resp:
             if resp.status == 200:
-                return await resp.read()
+                if resp.content_length is not None and resp.content_length > max_bytes:
+                    return None
+                data = bytearray()
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        return None
+                return bytes(data)
     except Exception as e:
         logger.debug(
             f"[AliceImageReverse] 下载失败: {_sanitize_url_for_logging(url)}, 错误: {e}"

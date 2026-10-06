@@ -91,10 +91,11 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
     plugin: Any = Field(default=None, repr=False)
     name: str = "alice_image_reverse_search"
     description: str = (
-        "查找用户已发送图片的来源。若 alice_image_list_session_images 可用，先查看图片并"
-        "优先用稳定的 image_id 选择目标；否则可直接搜索最新图片或使用 image_index。"
+        "查找图片来源或在回答图片相关问题时自主检索证据。明确选择 image_id 或 image_index；"
+        "不确定目标时先用可用的 alice_image_list_session_images 查看图片列表。"
         "支持 SauceNAO、Google Lens、Ascii2d 和 Yandex；可以用 intent 表达‘找出处/找相似图/看角色’，"
-        "让插件在已配置的引擎中选择更合适的一条。"
+        "让插件在已配置的引擎中选择合适的组合。默认只返回证据给模型，不向聊天发送结果图；"
+        "用户明确要求查看结果时才设置 send_results=true。"
     )
     parameters: dict[str, Any] = Field(
         default_factory=lambda: {
@@ -106,7 +107,7 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
                 },
                 "image_index": {
                     "type": "integer",
-                    "description": "兼容索引：-1 为最新，1 为最早。image_id 优先。",
+                    "description": "明确选择的图片索引：-1 为最新，1 为最早。必须与 image_id 二选一。",
                 },
                 "strategies": {
                     "type": "string",
@@ -115,6 +116,10 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
                 "intent": {
                     "type": "string",
                     "description": "可选，自然语言意图，如‘找出处’、‘找相似图’、‘看这个角色’。仅在未指定 strategies 时生效。",
+                },
+                "send_results": {
+                    "type": "boolean",
+                    "description": "true 把结果卡片发到聊天；false 只返回内部证据。省略时遵循配置，默认静默。自主识图请省略或传 false，用户要看结果图时才传 true。",
                 },
             },
         }
@@ -132,8 +137,9 @@ class AliceReverseImageTool(FunctionTool[AstrAgentContext]):
             event=event,
             image_id=kwargs.get("image_id"),
             intent=kwargs.get("intent"),
-            image_index=kwargs.get("image_index", -1),
+            image_index=kwargs.get("image_index"),
             strategies=kwargs.get("strategies"),
+            send_results=kwargs.get("send_results"),
         )
 
 

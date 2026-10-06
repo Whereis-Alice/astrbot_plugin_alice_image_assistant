@@ -36,7 +36,7 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
         }
         plugin.pixiv = _Pixiv()
         event = SimpleNamespace(
-            message_str="aaP 星之卡比 1",
+            message_str="插画 星之卡比 1",
             plain_result=lambda text: text,
         )
 
@@ -72,11 +72,11 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
         }
         plugin.pixiv = _Pixiv()
         works_event = SimpleNamespace(
-            message_str="aaP画师作 29872901 1",
+            message_str="画师作品 29872901 1",
             plain_result=lambda text: text,
         )
         random_event = SimpleNamespace(
-            message_str="aaP画师随 29872901 2",
+            message_str="随机插画 29872901 2",
             plain_result=lambda text: text,
         )
 
@@ -100,7 +100,7 @@ class BehavioralEdgeTests(unittest.IsolatedAsyncioTestCase):
     def test_reverse_wait_recognizes_only_the_new_command(self) -> None:
         current = SimpleNamespace(
             is_at_or_wake_command=True,
-            message_str="aa溯 google",
+            message_str="识图 google",
         )
         old = SimpleNamespace(
             is_at_or_wake_command=True,

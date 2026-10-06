@@ -19,11 +19,12 @@ from .constant import (
     SERPAPI_BASE_URL,
     SERPAPI_KEY_PENALTY_SECONDS,
     SOURCE_KEY_GOOGLE_LENS,
+    SOURCE_KEY_GOOGLE_LENS_EXACT,
 )
 from .models import SearchResultItem
-from .ranking import positional_score
+from .ranking import dedupe_by_url, positional_score
 from .strategy import ImageSearchStrategy
-from .utils import coerce_int, get_aiohttp_session, get_proxy_url
+from .utils import coerce_bool, coerce_int, get_aiohttp_session, get_proxy_url
 
 # 额度缓存 TTL（秒）
 QUOTA_CACHE_TTL = 60
@@ -49,16 +50,25 @@ class GoogleLensStrategy(ImageSearchStrategy):
         self,
         api_keys: list[str] | None = None,
         max_results: int = DEFAULT_GOOGLE_LENS_MAX_RESULTS,
+        *,
+        search_type: str = "all",
+        language: str = "zh-cn",
+        country: str = "",
+        auto_crop: bool = False,
     ) -> None:
         """初始化 Google Lens 策略.
 
         Args:
             api_keys: SerpAPI API Key 列表，支持多 Key 负载均衡
-            max_results: 单次取用的 visual_matches 条数
+            max_results: 去重后单次取用的匹配条数
         """
         self.api_keys = api_keys or []
         # WebUI 传来的数值可能是字符串，先强制转换再夹取，避免初始化期崩溃
         self.max_results = coerce_int(max_results, DEFAULT_GOOGLE_LENS_MAX_RESULTS, 1, 30)
+        self.search_type = search_type if search_type in {"all", "exact_matches", "visual_matches", "products"} else "all"
+        self.language = str(language or "zh-cn").strip()[:20]
+        self.country = str(country or "").strip()[:5]
+        self.auto_crop = coerce_bool(auto_crop, False)
         self._current_key_index = 0
         self._key_lock = asyncio.Lock()
         # 额度缓存: {api_key: (searches_left, timestamp)}
@@ -102,7 +112,7 @@ class GoogleLensStrategy(ImageSearchStrategy):
             except Exception as e:
                 # 记录异常但继续尝试其他 key
                 logger.warning(
-                    f"[GoogleLens] Key 尝试失败 (尝试 {attempt + 1}/{len(self.api_keys)}): {e}"
+                    f"[GoogleLens] Key 尝试失败 (尝试 {attempt + 1}/{len(self.api_keys)}): {type(e).__name__}"
                 )
                 last_exception = e
                 continue
@@ -110,11 +120,11 @@ class GoogleLensStrategy(ImageSearchStrategy):
         # 所有 Key 都失败
         if last_exception:
             logger.error(
-                f"[GoogleLens] 所有 API Key 均失败，最后错误: {last_exception}"
+                f"[GoogleLens] 所有 API Key 均失败，最后错误类型: {type(last_exception).__name__}"
             )
         else:
             logger.error("[GoogleLens] 所有 API Key 已耗尽")
-        return []
+        raise RuntimeError("Google Lens 搜索服务不可用")
 
     async def _search_with_key(self, image_url: str) -> list[SearchResultItem]:
         """使用当前选中的 Key 执行搜索.
@@ -167,8 +177,12 @@ class GoogleLensStrategy(ImageSearchStrategy):
             "api_key": api_key,
             "engine": "google_lens",
             "url": image_url,
-            "hl": "zh-cn",
+            "type": self.search_type,
+            "hl": self.language,
+            "auto_crop": str(self.auto_crop).lower(),
         }
+        if self.country:
+            params["country"] = self.country
 
         url = f"{SERPAPI_BASE_URL}/search?{urllib.parse.urlencode(params)}"
 
@@ -179,39 +193,63 @@ class GoogleLensStrategy(ImageSearchStrategy):
         async with session.get(url, timeout=timeout, proxy=proxy) as resp:
             if resp.status != 200:
                 # 处理额度耗尽错误：标记当前 key 耗尽，并抛出异常让上层重试
-                if resp.status in (401, 403):
+                if resp.status in (401, 403, 429):
                     await self._mark_key_exhausted(api_key)
                     raise SerpApiQuotaExhaustedError(api_key, status=resp.status)
-                logger.error(f"[GoogleLens] API 返回错误: HTTP {resp.status}")
-                return []
+                raise RuntimeError(f"Google Lens HTTP {resp.status}")
 
             text = await resp.text()
             data = json.loads(text)
 
         # 检查响应中的错误
+        if not isinstance(data, dict):
+            raise ValueError("Google Lens 返回了非对象响应")
         if "error" in data:
-            error_msg = data.get("error", "")
+            error_msg = str(data.get("error") or "")
+            if "hasn't returned any results" in error_msg.lower():
+                logger.info("[GoogleLens] SerpAPI 未返回匹配结果")
+                return []
             if "API key" in error_msg or "exceeded" in error_msg.lower():
                 await self._mark_key_exhausted(api_key)
                 raise SerpApiQuotaExhaustedError(api_key, status=None)
-            logger.error(f"[GoogleLens] SerpAPI 错误: {error_msg}")
-            return []
+            raise RuntimeError("Google Lens API 返回错误")
 
         # 解析结果
         results: list[SearchResultItem] = []
-        matches = data.get("visual_matches")
-        if isinstance(matches, list):
-            limit = min(len(matches), self.max_results)
+        # exact_matches 是 Google 判定为同图/同来源的强证据，排在 visual_matches 之前。
+        # 跳过脏项并合并重复链接后再截断，保留后续的有效线索。
+        match_groups = (
+            ("exact_matches", SOURCE_KEY_GOOGLE_LENS_EXACT),
+            ("visual_matches", SOURCE_KEY_GOOGLE_LENS),
+        )
+        if self.search_type == "exact_matches":
+            match_groups = match_groups[:1]
+        elif self.search_type in {"visual_matches", "products"}:
+            match_groups = match_groups[1:]
+        for group_name, source_key in match_groups:
+            matches = data.get(group_name)
+            if not isinstance(matches, list):
+                continue
+            valid_matches = [
+                match
+                for match in matches
+                if isinstance(match, dict)
+                and isinstance(match.get("title"), str)
+                and bool(match.get("title", "").strip())
+                and isinstance(match.get("link"), str)
+                and match.get("link", "").startswith(("https://", "http://"))
+            ]
+            limit = len(valid_matches)
 
-            for i in range(limit):
+            for i, match in enumerate(valid_matches[:limit]):
                 try:
-                    match = matches[i]
-                    if not isinstance(match, dict):
-                        continue
                     title = match.get("title", "")
                     link = match.get("link", "")
-                    source = match.get("source", "")
+                    source = str(match.get("source") or "")
+                    snippet = str(match.get("snippet") or match.get("description") or "")
                     thumbnail = match.get("thumbnail", "")
+                    if not isinstance(thumbnail, str) or not thumbnail.startswith(("https://", "http://")):
+                        thumbnail = ""
 
                     if not title or not link:
                         continue
@@ -224,19 +262,18 @@ class GoogleLensStrategy(ImageSearchStrategy):
                             thumbnail_bytes=None,  # 缩略图统一由 service 并行下载
                             source="Google Lens",
                             similarity=None,
-                            description=source,
-                            domain=None,
-                            # Google Lens 不给相似度，只能用"位次越前越可信"近似，
-                            # 再乘来源可信度系数，才能和 SauceNAO 的真实相似度同尺度排序。
-                            score=positional_score(i, limit, SOURCE_KEY_GOOGLE_LENS),
-                            source_key=SOURCE_KEY_GOOGLE_LENS,
+                            description=" · ".join(part for part in (source, snippet) if part)[:800],
+                            domain=urllib.parse.urlsplit(link).hostname,
+                            # 位次仅是启发式排序依据，不是识别正确率。
+                            score=positional_score(i, limit, source_key),
+                            source_key=source_key,
                         )
                     )
                 except Exception as e:
-                    logger.warning(f"[GoogleLens] 解析结果项失败: {e}")
+                    logger.warning(f"[GoogleLens] 解析结果项失败: {type(e).__name__}")
 
         logger.info(f"[GoogleLens] 搜索完成，获取 {len(results)} 条结果")
-        return results
+        return dedupe_by_url(results)[: self.max_results]
 
     async def _select_key_optimistically(self) -> str | None:
         """乐观选择 API Key，不预先检查额度.

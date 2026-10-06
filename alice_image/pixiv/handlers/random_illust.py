@@ -37,7 +37,7 @@ class RandomIllustHandler:
             yield event.plain_result(
                 "请输入要添加的随机搜索标签。\n"
                 "支持多标签和多个负面标签，例如：\n"
-                "/aaP随加 露露卡,光之美少女,-ntr,-futa"
+                "/随机添加 露露卡,光之美少女,-ntr,-futa"
             )
             return
 
@@ -58,7 +58,7 @@ class RandomIllustHandler:
         """删除随机搜索标签"""
         if not index.isdigit():
             yield event.plain_result(
-                "请输入要删除的标签序号 (数字)。可通过 /aaP随列 查看。"
+                "请输入要删除的标签序号 (数字)。可通过 /随机列表 查看。"
             )
             return
 
@@ -177,7 +177,7 @@ class RandomIllustHandler:
 
         if not args_list or args_list[0].lower() == "help":
             yield event.plain_result(
-                "用法: /aaP随榜加 <模式> [日期]\n"
+                "用法: /榜单添加 <模式> [日期]\n"
                 f"模式: {', '.join(valid_modes)}\n"
                 "日期: 可选，格式 YYYY-MM-DD"
             )
@@ -213,7 +213,7 @@ class RandomIllustHandler:
         """删除随机排行榜配置"""
         if not index.isdigit():
             yield event.plain_result(
-                "请输入要删除的序号 (数字)。可通过 /aaP随榜列 查看。"
+                "请输入要删除的序号 (数字)。可通过 /榜单列表 查看。"
             )
             return
 

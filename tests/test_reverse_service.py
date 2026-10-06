@@ -151,6 +151,16 @@ class ReverseRobustnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.items), 2)
         self.assertTrue(all(item.thumbnail_bytes == b"png-bytes" for item in result.items))
 
+    async def test_thumbnail_download_can_be_skipped_for_silent_tools(self) -> None:
+        service = AliceImageReverseService([_ThumbStrategy("t", 2, fail=False)])
+        result = await service.explore(
+            "https://example.com/input.jpg",
+            download_thumbnails=False,
+        )
+
+        self.assertEqual(len(result.items), 2)
+        self.assertTrue(all(item.thumbnail_bytes is None for item in result.items))
+
 
 if __name__ == "__main__":
     unittest.main()

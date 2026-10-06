@@ -34,6 +34,7 @@ from .constant import (
     MIN_TOTAL_TIMEOUT_SECONDS,
     REVERSE_SEARCH_COMMAND_NAMES,
 )
+from .evidence import EVIDENCE_GUIDANCE, evidence_payload, review_evidence, select_evidence
 from .google_lens_strategy import GoogleLensStrategy
 from .image_context import (
     get_image_context_manager,
@@ -43,6 +44,7 @@ from .models import SearchResultItem
 from .sauce_nao_strategy import SauceNaoStrategy
 from .service import AliceImageReverseService
 from .strategy import ImageSearchStrategy
+from .tool_cache import ToolEvidence, ToolEvidenceCache
 from .utils import (
     close_aiohttp_session,
     coerce_bool,
@@ -105,6 +107,7 @@ class AliceReverseController:
         """初始化插件."""
         self.context = context
         self.config = self._config_to_dict(config)
+        self._tool_cache = ToolEvidenceCache()
         timeout = self._get_nested_config(
             "command",
             "image_wait_timeout_seconds",
@@ -304,7 +307,11 @@ class AliceReverseController:
         if enable_google_lens and serpapi_keys and isinstance(serpapi_keys, list):
             self.strategies.append(
                 GoogleLensStrategy(
-                    api_keys=serpapi_keys, max_results=google_lens_max_results
+                    api_keys=serpapi_keys, max_results=google_lens_max_results,
+                    search_type=str(strategies_config.get("google_lens_search_type", "all")),
+                    language=strategies_config.get("google_lens_language", "zh-cn"),
+                    country=strategies_config.get("google_lens_country", ""),
+                    auto_crop=strategies_config.get("google_lens_auto_crop", False),
                 )
             )
             logger.info("[AliceImageReverse] 已加载 Google Lens 策略")
@@ -374,6 +381,7 @@ class AliceReverseController:
 
     async def terminate(self):
         """插件卸载时清理资源."""
+        await self._tool_cache.close()
         async with self._image_wait_lock:
             wait_states = list(self._image_wait_states.values())
             self._image_wait_states.clear()
@@ -384,15 +392,6 @@ class AliceReverseController:
             await strategy.close()
         # 关闭全局 aiohttp session
         await close_aiohttp_session()
-
-    def _is_llm_tool_silent_mode(self) -> bool:
-        """检查 LLM 工具是否为静默模式.
-
-        Returns:
-            True 如果静默模式开启
-        """
-        ai_behavior = self._get_config_section("ai_behavior")
-        return ai_behavior.get("llm_tool_silent_mode", False)
 
     @staticmethod
     def _get_image_wait_key(event: AstrMessageEvent) -> tuple[str, str]:
@@ -592,24 +591,33 @@ class AliceReverseController:
     async def tool_search_image(
         self,
         event: AstrMessageEvent,
-        image_index: int = -1,
+        image_index: int | None = None,
         strategies: str | None = None,
         image_id: str | None = None,
         intent: str | None = None,
+        send_results: bool | None = None,
     ) -> str:
         """Search for the source of an image.
 
-        BEFORE calling this tool, call get_session_images and prefer image_id to select the target image.
+        Use this tool to retrieve evidence for image-related questions. Explicitly select
+        the target with image_id or image_index; omitting both
+        is an error so that an unrelated latest image is never searched by accident.
 
         Args:
-            image_index(int): Fallback image index. -1 = most recent image, 1 = first/oldest image.
+            image_index(int): Explicit image index. -1 = most recent image, 1 = first/oldest image.
+                Must be provided when image_id is omitted.
             strategies(string): Optional. Comma-separated strategy list: saucenao/sauce, google, ascii2d/2d, yandex.
             image_id(string): Optional stable image ID returned by get_session_images. Higher priority than image_index.
             intent(string): Optional natural-language intent such as "找出处", "找相似图", or "看角色".
                 Used only when strategies is omitted; an explicit strategy list always wins.
+            send_results(boolean): Whether to send result images and links into the chat. When omitted,
+                follow llm_tool_send_results_default (false by default);
+                keep false when the model only needs evidence to answer the user. Set true only when the user
+                explicitly asks to see the search result cards/images.
 
         Returns:
-            JSON result with search results. You MUST present the results to the user with URLs and titles.
+            JSON result with search results and evidence guidance. Present a conclusion to the user;
+                only include result URLs when they help answer the explicit request.
         """
         # 检查是否有可用策略
         if not self.strategies:
@@ -618,38 +626,61 @@ class AliceReverseController:
                 ensure_ascii=False,
             )
 
+        if send_results is not None and not isinstance(send_results, bool):
+            return json.dumps({"success": False, "error": "send_results 必须为布尔值"}, ensure_ascii=False)
+        ai_behavior = self._get_config_section("ai_behavior")
+        should_send = send_results if send_results is not None else coerce_bool(
+            ai_behavior.get("llm_tool_send_results_default", False), False,
+        )
         image_ctx = get_image_context_manager()
         image_url = None
         selected_by = "image_index"
+        selection_error = "未找到指定的图片"
 
         # 优先使用稳定 image_id；显式传入的 image_id 查不到时**不能**静默回退到
         # 最新图片——那会让 LLM 搜了另一张图却以为搜的是指定的那张。
-        if image_id and image_id.strip():
-            requested_id = image_id.strip()
-            image_url = image_ctx.get_image_by_id(event, requested_id)
+        if image_id is not None:
+            requested_id = image_id.strip() if isinstance(image_id, str) else ""
+            if not requested_id:
+                selection_error = "image_id 必须是非空字符串"
+            else:
+                image_url = image_ctx.get_image_by_id(event, requested_id)
             if not image_url:
                 return json.dumps(
                     {
                         "success": False,
-                        "error": f"未找到 image_id 为 {requested_id} 的图片",
+                        "error": (
+                            f"未找到 image_id 为 {requested_id} 的图片"
+                            if requested_id
+                            else selection_error
+                        ),
                         "image_context": image_ctx.get_image_context_info(event),
                         "hint": "image_id 可能已过期或不属于当前会话，请调用 get_session_images 重新获取后再指定",
                     },
                     ensure_ascii=False,
                 )
             selected_by = "image_id"
+        elif image_index is not None:
+            if (
+                isinstance(image_index, int)
+                and not isinstance(image_index, bool)
+                and (image_index == -1 or image_index > 0)
+            ):
+                image_url = image_ctx.get_image_by_index(event, image_index)
+                selected_by = "image_index"
+            else:
+                selection_error = "image_index 必须是 -1 或大于 0 的整数"
         else:
-            image_url = image_ctx.get_image_by_index(event, image_index)
-            selected_by = "image_index"
+            selection_error = "请明确指定 image_id 或 image_index"
 
         if not image_url:
             images_info = image_ctx.get_image_context_info(event)
             return json.dumps(
                 {
                     "success": False,
-                    "error": "未找到指定的图片",
+                    "error": selection_error,
                     "image_context": images_info,
-                    "hint": "请先让用户发送图片，或先调用 get_session_images 后使用 image_id / image_index 选择图片",
+                    "hint": "请先调用 alice_image_list_session_images，再使用返回的 image_id 或 image_index；不要默认猜测最新图片",
                 },
                 ensure_ascii=False,
             )
@@ -661,7 +692,7 @@ class AliceReverseController:
                 {
                     "success": False,
                     "error": "无法获取有效的图片 URL",
-                    "hint": "请确保图片可访问，或让用户回复图片发送「aa溯」命令",
+                    "hint": "请确保图片可访问，或让用户回复图片发送「识图」命令",
                 },
                 ensure_ascii=False,
             )
@@ -705,75 +736,80 @@ class AliceReverseController:
             if intent_route.recognized and intent_route.strategy_names:
                 strategy_names = list(intent_route.strategy_names)
                 selection_mode = "intent"
+                # 工具查证保留互补引擎，现实照片不只查插画库。
+                complement = "Yandex" if intent_route.category == "photo" else "Google Lens"
+                if (
+                    intent_route.category in {"photo", "source", "character", "anime"}
+                    and complement in available_strategies
+                    and complement not in strategy_names
+                ):
+                    strategy_names.append(complement)
 
         logger.info(
-            f"[AliceImageReverse] AI 工具调用搜图: {http_url}, "
+            f"[AliceImageReverse] AI 工具调用搜图，"
             f"选择方式: {selected_by}, "
             f"可用策略: {available_strategies}, "
             f"策略选择: {strategy_names or '全部'}, "
             f"意图: {requested_intent or '未指定'}"
         )
 
-        # 执行搜索
-        result = await self.service.explore(http_url, strategy_names=strategy_names)
+        selected_strategies, _ = self.service.resolve_strategy_names(strategy_names)
+        cache_key = (
+            str(getattr(event, "unified_msg_origin", "") or getattr(event, "session_id", "")),
+            str(getattr(getattr(event, "message_obj", None), "message_id", "") or id(event)),
+            http_url, tuple(sorted(s.get_service_name() for s in selected_strategies)),
+            json.dumps(ai_behavior, sort_keys=True, default=str),
+        )
 
+        async def retrieve() -> ToolEvidence:
+            result = await self.service.explore(
+                http_url, strategy_names=strategy_names, download_thumbnails=False,
+            )
+            limit = coerce_int(ai_behavior.get("llm_evidence_max_results"), 12, 4, 30)
+            evidence = select_evidence(result.evidence_items or result.items, limit)
+            visual = {"status": "disabled"}
+            if evidence and coerce_bool(ai_behavior.get("visual_evidence_enabled", True), True):
+                visual = await review_evidence(self.context, event, http_url, evidence, ai_behavior)
+            return ToolEvidence(result=result, items=evidence, visual=visual)
+
+        cached, cache_hit = await self._tool_cache.get(cache_key, retrieve)
+        result = cached.result
         if not result.items:
             return json.dumps(
-                {"success": False, "error": "未找到相关图片来源"}, ensure_ascii=False
-            )
-
-        # 检查是否为静默模式
-        silent_mode = self._is_llm_tool_silent_mode()
-
-        # 非静默模式下，像命令方式一样发送消息给用户
-        if not silent_mode:
-            await self._send_search_results(event, result.items)
-
-        # 构建结果供 AI 参考
-        items_data = []
-        for idx, item in enumerate(result.items, start=1):
-            items_data.append(
                 {
-                    "index": idx,
-                    "title": item.title,
-                    "url": item.url,
-                    "source": item.source,
-                    "similarity": item.similarity,
-                    "domain": item.domain,
-                    # 把归一化置信度与命中引擎一并给 LLM：多引擎共识是最强的可信信号
-                    "score": item.score,
-                    "matched_by": item.matched_by,
-                }
+                    "success": False,
+                    "error": "搜索服务暂时不可用" if result.all_failed else "本次未获得可用图片来源，不能据此确认或否定图片内容",
+                    "failed_strategies": result.failed_strategies,
+                    "cache_hit": cache_hit,
+                    "message_sent": False,
+                }, ensure_ascii=False
             )
 
-        # 根据模式构建不同的指令
-        result_count = len(result.items)
-        if silent_mode:
-            instruction = (
-                f"搜索结果如下，请向用户展示：\n"
-                f"找到 {result_count} 个结果：\n"
-                "1. 标题 - 来源: xxx, 相似度: xx%\n"
-                "   链接: URL\n"
-                "2. ...\n"
-                "注意：请直接输出纯文本，不要使用 Markdown 链接语法 [文本](URL)，"
-                "因为部分平台不支持 Markdown。请直接输出完整 URL。"
-            )
-        else:
-            instruction = (
-                f"搜索结果已以图片消息形式发送给用户。你仍需要向用户说明搜索结果：\n"
-                f"找到 {result_count} 个结果：\n"
-                "1. 标题 - 来源: xxx, 相似度: xx%\n"
-                "   链接: URL\n"
-                "2. ...\n"
-                "注意：请直接输出纯文本，不要使用 Markdown 链接语法 [文本](URL)，"
-                "因为部分平台不支持 Markdown。请直接输出完整 URL。"
-            )
+        send_error = None
+        if should_send:
+            async with cached.send_lock:
+                if not cached.sent:
+                    try:
+                        await self.service._fill_thumbnails(result.items)
+                        await self._send_search_results(event, result.items)
+                        cached.sent = True
+                    except Exception as exc:
+                        send_error = f"结果发送失败：{type(exc).__name__}；搜索证据仍可用"
+                        logger.warning(f"[AliceImageReverse] {send_error}")
+                    finally:
+                        # 缓存只保留证据，避免长时间持有已发送的图片字节。
+                        for item in result.items:
+                            item.thumbnail_bytes = None
 
         return json.dumps(
             {
                 "success": True,
-                "count": len(result.items),
-                "items": items_data,
+                "count": len(cached.items),
+                "items": evidence_payload(cached.items),
+                "visual_evidence": cached.visual,
+                "failed_strategies": result.failed_strategies,
+                "cache_hit": cache_hit,
+                "target": {"image_id": image_id, "image_index": image_index},
                 "available_strategies": available_strategies,
                 "used_strategies": strategy_names
                 if strategy_names
@@ -782,8 +818,10 @@ class AliceReverseController:
                 "intent": requested_intent or None,
                 "intent_route": intent_route.to_dict() if intent_route else None,
                 "selected_by": selected_by,
-                "message_sent": not silent_mode,
-                "instruction": instruction,
+                "message_sent": cached.sent,
+                "send_results": should_send,
+                "send_error": send_error,
+                "instruction": EVIDENCE_GUIDANCE,
             },
             ensure_ascii=False,
         )
@@ -796,13 +834,13 @@ class AliceReverseController:
         """搜图指令 - 附带、回复或随后发送一张图片进行搜索
 
         用法:
-        - 搜图 (无参数): 使用所有可用策略搜索
-        - 搜图 saucenao: 只使用 SauceNAO 搜索
-        - 搜图 google: 只使用 Google Lens 搜索
-        - 搜图 ascii2d: 只使用 Ascii2d 搜索
-        - 搜图 yandex: 只使用 Yandex 搜索
-        - 搜图 saucenao,google: 使用多个指定策略
-        - 搜图 出处 / 相似图 / 角色: 按自然语言意图选择一个最合适的已加载策略
+        - 识图 (无参数): 使用所有可用策略搜索
+        - 识图 saucenao: 只使用 SauceNAO 搜索
+        - 识图 google: 只使用 Google Lens 搜索
+        - 识图 ascii2d: 只使用 Ascii2d 搜索
+        - 识图 yandex: 只使用 Yandex 搜索
+        - 识图 saucenao,google: 使用多个指定策略
+        - 识图 出处 / 相似图 / 角色: 按自然语言意图选择一个最合适的已加载策略
 
         别名: sauce=saucenao, 2d=ascii2d；显式策略优先于意图路由。
         """

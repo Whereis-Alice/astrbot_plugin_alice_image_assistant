@@ -29,8 +29,8 @@ class AlicePixivController:
     AstrBot 插件，用于通过 Pixiv API 搜索插画。
     配置通过 AstrBot WebUI 进行管理。
     用法:
-        /aaP <标签1>,<标签2>,... [数量]  搜索 Pixiv 插画
-        /aaP帮助                         查看帮助信息
+        /插画 <标签1>,<标签2>,... [数量]  搜索 Pixiv 插画
+        /插画帮助                         查看帮助信息
     可在配置中设置认证信息、返回数量和 R18 过滤模式。
     """
 
@@ -191,7 +191,7 @@ class AlicePixivController:
             yield result
 
     async def pixiv_and(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /aaP并 命令，进行 AND 逻辑深度搜索"""
+        """处理 /插画并搜 命令，进行 AND 逻辑深度搜索"""
         async for result in self.illust_handler.pixiv_and(event, tags):
             yield result
 
@@ -221,7 +221,7 @@ class AlicePixivController:
     async def pixiv_deepsearch(self, event: AstrMessageEvent, tags: str):
         """
         深度搜索 Pixiv 插画，通过翻页获取多页结果
-        用法: /aaP深 <标签1>,<标签2>,...
+        用法: /深度插画 <标签1>,<标签2>,...
         注意: 翻页深度由配置中的 deep_search_depth 参数控制
         """
         async for result in self.illust_handler.pixiv_deepsearch(event, tags):
@@ -284,7 +284,7 @@ class AlicePixivController:
     # --------小说类
 
     async def pixiv_novel(self, event: AstrMessageEvent, tags: str = ""):
-        """处理 /aaP文 命令，搜索 Pixiv 小说"""
+        """处理 /小说 命令，搜索 Pixiv 小说"""
         async for result in self.novel_handler.pixiv_novel(event, tags):
             yield result
 
@@ -344,14 +344,6 @@ class AlicePixivController:
         """生成并返回帮助信息"""
 
         help_text = get_help_message("pixiv_help", "帮助消息加载失败，请检查配置文件。")
-        help_text = help_text.replace(
-            "`/aaP画师作 <用户ID>`", "`/aaP画师作 <用户ID> [数量]`"
-        )
-        help_text += (
-            "\n\n## 画师随机作品\n"
-            "- `/aaP画师随 <用户ID> [数量]` - 从指定画师近期作品中随机获取，"
-            "并排除配置的屏蔽标签"
-        )
         yield event.plain_result(help_text)
 
     # ----随机搜索类

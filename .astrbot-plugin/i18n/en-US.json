@@ -1,7 +1,7 @@
 {
   "metadata": {
     "display_name": "Alice Image Assistant",
-    "desc": "Lets your bot find images precisely, pick them with vision review, and trace sources, while keeping the full short-command set. Ships a 6-theme Dashboard WebUI for configuration and live trials."
+    "desc": "Lets your bot find images, review candidates visually, and quietly gather image-source evidence. Includes 48 plain Chinese commands and a 6-theme Dashboard WebUI for configuration and live trials."
   },
   "pages": {
     "alice": {

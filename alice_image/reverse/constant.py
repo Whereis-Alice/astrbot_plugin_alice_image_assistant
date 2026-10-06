@@ -38,7 +38,7 @@ MIN_PER_ENGINE_FETCH = 5
 # ==============================================================================
 
 # 搜图命令主名称 (与 main.py 中 @filter.command 注册的名称保持一致)
-REVERSE_SEARCH_COMMAND = "aa溯"
+REVERSE_SEARCH_COMMAND = "识图"
 
 # 搜图命令别名 (当前未注册别名；新增别名时同时补到这里)
 REVERSE_SEARCH_COMMAND_ALIASES: tuple[str, ...] = ()
@@ -114,6 +114,7 @@ DEFAULT_YANDEX_MAX_RESULTS = 5
 # 归一化的来源键 (写入 SearchResultItem.source_key，用于统一排序与融合)
 SOURCE_KEY_SAUCENAO = "saucenao"
 SOURCE_KEY_GOOGLE_LENS = "google_lens"
+SOURCE_KEY_GOOGLE_LENS_EXACT = "google_lens/exact"
 SOURCE_KEY_ASCII2D = "ascii2d"
 SOURCE_KEY_ASCII2D_BOVW = "ascii2d/bovw"
 SOURCE_KEY_ASCII2D_COLOR = "ascii2d/color"
@@ -128,6 +129,7 @@ SOURCE_CONFIDENCE: dict[str, float] = {
     SOURCE_KEY_ASCII2D: 0.8,
     SOURCE_KEY_ASCII2D_COLOR: 0.7,
     SOURCE_KEY_GOOGLE_LENS: 0.6,
+    SOURCE_KEY_GOOGLE_LENS_EXACT: 0.82,
     SOURCE_KEY_YANDEX: 0.58,
 }
 
@@ -141,6 +143,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     SOURCE_KEY_ASCII2D: 2,
     SOURCE_KEY_ASCII2D_COLOR: 3,
     SOURCE_KEY_GOOGLE_LENS: 4,
+    SOURCE_KEY_GOOGLE_LENS_EXACT: 1,
     SOURCE_KEY_YANDEX: 5,
 }
 

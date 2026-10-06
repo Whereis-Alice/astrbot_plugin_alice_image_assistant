@@ -1,6 +1,6 @@
 # 爱丽丝的图片助手
 
-为 AstrBot 提供一套统一的图片工作流：Bot 可以按用户意图自行精确找图、从候选中挑图、在来源失败时自动换源，也可以对用户发送的图片查找出处。完整保留 Pixiv、文字搜图和多引擎以图搜图能力，但所有公开命令、LLM 工具和数据目录均使用新的 `aa` / `alice_image` 命名，不会与四个上游插件冲突。
+为 AstrBot 提供一套统一的图片工作流：Bot 可以按用户意图自行精确找图、从候选中挑图、在来源失败时自动换源，也可以对用户发送的图片查找出处。完整保留 Pixiv、文字搜图和多引擎以图搜图能力，公开命令使用直白的中文名称，LLM 工具和数据目录继续使用稳定的 `alice_image` 命名。
 
 ![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.16-5b8def)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
@@ -27,73 +27,114 @@ python -m playwright install chromium
 
 插件要求 AstrBot `>=4.16,<5`，建议使用支持 Function Calling 的模型；启用视觉审核时，所选模型还必须支持图片输入。
 
+### 更新到 v2.0.0
+
+在 AstrBot 的插件管理中更新“爱丽丝的图片助手”，然后重载插件或重启 AstrBot。也可从本仓库的 [v2.0.0 Release](https://github.com/Whereis-Alice/astrbot_plugin_alice_image_assistant/releases/tag/v2.0.0) 获取源码包。
+
+本版将全部 48 条公开指令改为中文，旧 `aa` / `aaP` / `aaF` 命令不再注册；更新后发送 `/图片帮助`，Pixiv 详细用法见 `/插画帮助`。凭据、订阅和运行数据继续沿用；人格、快捷回复中的旧命令需要同步替换。自主识图升级后默认不发结果卡片，详见下方“LLM 工具”。完整变化见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 快速开始
 
 1. 打开插件配置，按需要开启“找图模块”和“以图搜图模块”。
 2. 按需配置来源凭据：Pixiv Refresh Token、SerpApi Key、SauceNAO Key 或 Ascii2d Cookie；Yandex 不需要 API Key，直接开启即可尝试。
-3. 使用 `/aa` 查看当前启用状态与常用命令。
+3. 使用 `/图片帮助` 查看当前启用状态与常用命令。
 
 ```text
-/aa找 富士山 日出
-/aaP 星之卡比 1
-/aa溯 google
+/找图 富士山 日出
+/插画 星之卡比 1
+/识图 google
 ```
 
-`/aa溯` 可和图片同发、回复一条图片使用，或先发指令后在限定时间内补发图片。
+`/识图` 可和图片同发、回复一条图片使用，或先发指令后在限定时间内补发图片。
 
 ## 指令
 
-### 通用找图与反搜
+所有命令已重置为中文名称，旧前缀命令不再注册。`<...>` 是必填参数，`[...]` 是可选参数。
+
+开启作品链接自动解析后，直接发送 Pixiv 作品链接即可取图。`/识图` 支持附图、回复图或随后补图，可指定 `google`、`saucenao`、`ascii2d`、`yandex`，或填写“出处”“相似图”等意图。
+
+### 核心
 
 | 指令 | 用途 |
 |---|---|
-| `/aa` | 状态与速查帮助 |
-| `/aa找 <关键词>` | 自动选择来源找图，失败时按配置回退 |
-| `/aa神 <关键词>` | 仅优先使用搜图神器来源 |
-| `/aaS <关键词>` | 仅优先使用 SerpApi Google Images |
-| `/aa溯 [saucenao,google,ascii2d,yandex]` | 以图搜图；也可写 `/aa溯 出处`、`/aa溯 相似图`、`/aa溯 角色` 按意图选择引擎；可附图、回复图或随后补图 |
+| `/图片帮助` | 查看插件状态、当前找图来源与识图引擎。 |
+| `/找图 <关键词>` | 自动选源找图：按关键词判断走 Pixiv / 搜图 / SerpApi。 |
+| `/搜图 <关键词>` | 优先使用搜图神器来源，结合 Bing 补充和视觉挑图；按配置回退。 |
+| `/谷歌搜图 <关键词>` | 优先使用 SerpApi Google 图片搜索；按配置回退。 |
+| `/识图 [引擎/意图]` | 以图搜图：可指定引擎，也可写‘出处’‘相似图’等意图；附图、回复图片或随后补图均可。 |
 
-### Pixiv
-
-所有 Pixiv 原命令均改为独立短命令，避免与原插件的 `/pixiv*` 冲突。
-开启作品链接自动解析后，直接发送或在文字中附上 Pixiv 作品链接即可取图；兼容语言路径和旧版作品链接。
+### Pixiv 插画
 
 | 指令 | 用途 |
 |---|---|
-| `/aaP <标签> [数量]` | 标签搜索插画；数量可选，范围 1-10 |
-| `/aaP新 [类型] [最大作品ID]` | 最新插画 |
-| `/aaP荐` | 推荐插画 |
-| `/aaP并 <标签>` | AND 多标签搜索 |
-| `/aaPID <作品ID>` | 作品详情，含 Ugoira GIF |
-| `/aaP榜 [模式] [日期]` | 排行榜 |
-| `/aaP似 <作品ID>` | 相关作品 |
-| `/aaP深 <标签>` | 深度搜索 |
-| `/aaP评 <作品ID> [偏移]` | 插画评论 |
-| `/aaP辑 <特辑ID>` | 特辑详情 |
-| `/aaP热 <标签> [范围] [页数]` | 按收藏热度搜索 |
-| `/aaP趋势` | 趋势标签 |
-| `/aaPAI <true/false>` | 会话内 AI 作品显示设置 |
-| `/aaP画师 <关键词>` | 搜索画师 |
-| `/aaP画师详 <用户ID>` | 画师详情 |
-| `/aaP画师作 <用户ID> [数量]` | 画师作品；数量省略时使用配置默认值 |
-| `/aaP画师随 <用户ID> [数量]` | 从指定画师近期作品池随机取图，并过滤配置的屏蔽标签 |
-| `/aaP画师找 <画师名或用户ID> \| <关键词> [数量]` | 指定画师找图；关键词和数量可省略 |
-| `/aaP文 <标签>` | 搜索小说 |
-| `/aaP文荐` / `/aaP文新` | 推荐 / 最新小说 |
-| `/aaP文系 <系列ID>` | 小说系列 |
-| `/aaP文评 <小说ID> [偏移]` | 小说评论 |
-| `/aaP文下 <小说ID>` | 下载小说 PDF |
-| `/aaP订 <画师ID>` / `/aaP退 <画师ID>` / `/aaP订阅` | 画师订阅管理 |
-| `/aaP随加 <标签>` / `/aaP随删 <序号>` / `/aaP随列` | 随机标签搜索管理 |
-| `/aaP随停` / `/aaP随开` / `/aaP随态` / `/aaP随跑` | 随机搜索控制 |
-| `/aaP随榜加 <模式> [日期]` / `/aaP随榜删 <序号>` / `/aaP随榜列` | 随机排行榜管理 |
-| `/aaF主 <创作者> [数量]` | Fanbox 创作者和帖子 |
-| `/aaF帖 <帖子ID或链接>` | Fanbox 帖子详情 |
-| `/aaF荐 [数量]` | 推荐 Fanbox 创作者 |
-| `/aaF找 <关键词> [数量]` | 搜索 Fanbox 画师 |
-| `/aaP设置 show` | 查看 Pixiv 运行时设置 |
-| `/aaP设置 <键> <值>` | 修改允许的 Pixiv 运行时设置 |
-| `/aaP帮助` | Pixiv 指令与设置帮助 |
+| `/插画 <标签> [数量]` | 按标签搜索插画，支持逗号分隔与排除标签。 |
+| `/插画并搜 <标签1,标签2>` | 多标签 AND 搜索，要求同时命中全部标签。 |
+| `/深度插画 <标签>` | 跨多页搜索插画，匹配任一指定标签。 |
+| `/热门插画 <标签> [时间范围] [页数]` | 热度搜索：在时间窗内按收藏数排序。 |
+| `/最新插画 [类型] [最大作品ID]` | 获取最新作品；类型为 illust（插画）或 manga（漫画）。 |
+| `/推荐插画` | Pixiv 为你推荐的插画。 |
+| `/作品详情 <作品ID>` | 按作品 ID 直接取图。 |
+| `/相关插画 <作品ID>` | 查看与该作品相关的推荐。 |
+| `/插画榜 [模式] [日期]` | 排行榜：day / week / month / day_r18 等。 |
+| `/插画评论 <作品ID> [偏移量]` | 查看作品评论。 |
+| `/插画特辑 <特辑ID>` | 查看 Pixiv 特辑（showcase）内容。 |
+| `/趋势标签` | 查看当前热门标签趋势。 |
+
+### Pixiv 画师
+
+| 指令 | 用途 |
+|---|---|
+| `/画师 <画师名>` | 按名字搜索画师。 |
+| `/画师详情 <画师ID>` | 查看画师资料与统计。 |
+| `/画师作品 <画师ID或名字> [数量]` | 取该画师的作品列表。 |
+| `/随机插画 <画师ID或名字> [数量]` | 从该画师作品里随机抽图。 |
+| `/画师找图 <画师名或ID> [\| 关键词] [数量]` | 先锁定画师，再在其作品内按关键词做视觉挑图。 |
+
+### Pixiv 小说
+
+| 指令 | 用途 |
+|---|---|
+| `/小说 <标签>` | 按标签搜索小说。 |
+| `/推荐小说` | Pixiv 推荐小说。 |
+| `/最新小说 [最大小说ID]` | 获取最新小说。 |
+| `/小说系列 <系列ID>` | 查看小说系列目录。 |
+| `/小说评论 <小说ID> [偏移量]` | 查看小说评论。 |
+| `/下载小说 <小说ID>` | 把小说导出为 PDF 发送。 |
+
+### 订阅与定时
+
+| 指令 | 用途 |
+|---|---|
+| `/订阅画师 <画师ID>` | 订阅画师更新。 |
+| `/退订画师 <画师ID>` | 取消订阅画师。 |
+| `/画师订阅` | 查看本会话的订阅列表。 |
+| `/随机添加 <标签>` | 添加随机推送标签；推送间隔和数量使用配置值。 |
+| `/随机删除 <序号>` | 删除指定的随机推送任务。 |
+| `/随机列表` | 列出本会话的随机推送任务。 |
+| `/随机暂停` | 暂停本会话的随机推送。 |
+| `/随机开启` | 恢复本会话的随机推送。 |
+| `/随机状态` | 查看随机推送调度器状态。 |
+| `/随机执行` | 立刻手动触发一次随机推送。 |
+| `/榜单添加 <模式> [日期]` | 新增榜单定时推送。 |
+| `/榜单删除 <序号>` | 删除榜单定时推送。 |
+| `/榜单列表` | 列出榜单定时推送。 |
+
+### Fanbox
+
+| 指令 | 用途 |
+|---|---|
+| `/赞助画师 <创作者> [数量]` | 查看 Fanbox 创作者主页与帖子。 |
+| `/赞助帖子 <帖子ID或链接>` | 查看单个 Fanbox 帖子。 |
+| `/赞助推荐 [数量]` | Fanbox 推荐创作者。 |
+| `/赞助搜索 [关键词] [数量]` | 按画师名反查 Fanbox 创作者。 |
+
+### 设置与帮助
+
+| 指令 | 用途 |
+|---|---|
+| `/插画设置 [键] [值]` | 查看或修改 Pixiv 运行设置。 |
+| `/生成图设置 <true/false>` | 设置 Pixiv AI 作品显示偏好并同步本地过滤设置。 |
+| `/插画帮助` | 查看 Pixiv 全部指令说明。 |
 
 ## LLM 工具
 
@@ -104,13 +145,19 @@ python -m playwright install chromium
 | `alice_image_find` | 文字找图。模型可指定 `auto`、`pixiv`、`soutu` 或 `serpapi`；如需锁定 Pixiv 画师，可填写 `artist_name` 或 `pixiv_user_id`。 |
 | `alice_image_pixiv_novel` | 搜索或下载 Pixiv 小说。 |
 | `alice_image_list_session_images` | 列出当前会话可用于反搜的图片和稳定 `image_id`。 |
-| `alice_image_reverse_search` | 按 `image_id` 或索引以图搜图；可用 `strategies` 显式指定引擎，或用 `intent` 表达“找出处 / 找相似图 / 看角色”等意图。 |
+| `alice_image_reverse_search` | 明确指定 `image_id` 或 `image_index` 后查证图片；可指定 `strategies` 或 `intent`，省略 `send_results` 默认静默。 |
 
 找图工具会自行发送图片，并向模型返回结构化结果。`auto` 对二次元、插画、日文标签等按 Pixiv → 搜图神器 → SerpApi 尝试；普通实体和真实照片按搜图神器 → SerpApi → Pixiv 尝试。是否继续回退由配置决定，模型不需要也不应该虚构图片链接。
 
+反搜工具可为图片问题主动检索。先从 `alice_image_list_session_images` 取得目标 `image_id`，再调用 `alice_image_reverse_search`；不指定目标或使用失效 ID 会返回选图错误，不会偷偷改查最新图片。
+
+反搜的发送行为由可选参数 `send_results` 控制：省略时遵循配置（默认静默），`false` 强制静默，`true` 请求发送结果卡片。静默检索只把证据交给模型组织回答，手动 `/识图` 不受影响。旧 `llm_tool_silent_mode` 已被新配置替代。
+
+模型收到的证据包含每个来源的标题、摘要、链接、缩略图 URL，以及内部视觉核对的画面对应关系；不会返回图片二进制。网页标题可能与配图无关，排序分也不是识别正确率。视觉核对会区分拼图区域，无法核验时明确返回未核验状态。同一消息下的重复检索会短时复用结果；它能减少线索丢失和重复调用，但不保证每张图都能找到正确出处。
+
 ## 配置说明
 
-配置页只有两个顶层分组。
+配置页包含“找图模块”“以图搜图模块”和“Dashboard WebUI”三个顶层分组。
 
 ### 找图模块
 
@@ -120,22 +167,30 @@ python -m playwright install chromium
 - `auto_source_enabled`、`default_source`、`fallback_enabled`、`fallback_order`：控制自动选源与回退策略。
 - `llm_review`：控制视觉审核、审核模型和候选数量。审核模型留空且 `current_session_bot_enabled` 开启时，当前 Bot 会结合当前人格与最近几轮对话筛选候选；这次筛选不带工具，不会递归找图，也不会写入聊天历史。`strict_match_enabled` 默认拒绝发送视觉模型明确否决的候选；`fail_open` 只决定审核模型不可用、超时或解析失败时是否放行首图。
 - `pixiv`：有模块总开关、各项功能开关和完整 Pixiv 参数。需要填写 `refresh_token` 才能使用 Pixiv API；Fanbox 受限内容可另填 Cookie。
-- `pixiv.settings.return_count`：Pixiv 指令默认返回作品数。`/aaP`、`/aaP画师作` 和 `/aaP画师随` 末尾的数量可只覆盖本次调用，不会修改配置。
+- `pixiv.settings.return_count`：Pixiv 指令默认返回作品数。`/插画`、`/画师作品` 和 `/随机插画` 末尾的数量可只覆盖本次调用，不会修改配置。
 - `pixiv.settings.randomize_search_results`：默认随机抽取多候选 Pixiv 结果；`recent_dedup_enabled` 会按群聊或私聊避开近期已发作品。作品 ID 和链接直取不受影响，候选全部用完时会自动复用旧作品。
-- `pixiv.settings.artist_random_blocked_tags`：仅用于 `/aaP画师随`，精确屏蔽带有指定原始标签或翻译标签的作品；`artist_random_pages` 控制随机作品池页数。
+- `pixiv.settings.artist_random_blocked_tags`：仅用于 `/随机插画`，精确屏蔽带有指定原始标签或翻译标签的作品；`artist_random_pages` 控制随机作品池页数。
 - `soutu`：可分别关主图源、Bing 补充和视觉挑图。关闭 `enabled` 后不会启动 Playwright 抓取。
 - `serpapi`：仅包含文字搜图；填写 `serpapi_keys` 后可轮询多个 Key，并可独立关闭 `vlm_selection_enabled` 视觉淘汰赛。
 
 ### 以图搜图模块
 
-- `enabled`、`commands_enabled`、`llm_tools_enabled`：分别控制模块、`/aa溯` 和模型工具；`inject_tool_guidance_enabled` 可单独关闭模型提示注入。
+- `enabled`、`commands_enabled`、`llm_tools_enabled`：分别控制模块、`/识图` 和模型工具；`inject_tool_guidance_enabled` 可单独关闭模型提示注入。
 - `ai_behavior.capture_image_context`：控制是否保存用户发图供 Bot 主动反搜；关闭后不会保留会话图片。
+- `ai_behavior.llm_tool_send_results_default`：省略工具发送参数时是否发结果卡片，默认 `false`。工具显式传参优先，手动指令不受影响。
+- `ai_behavior.llm_evidence_max_results`：模型证据条数，默认 12，独立于聊天展示上限。
+- `ai_behavior.visual_evidence_enabled`：默认开启原图与候选核对，会增加一次内部视觉模型调用，最多等待 30 秒；无可用视觉模型时保留文本线索。`visual_evidence_provider_id` 留空使用当前会话模型，`visual_evidence_max_images` 默认 6，控制候选图片数。
 - `strategies`：可独立启用 SauceNAO、Google Lens、Ascii2d、Yandex；Yandex 还可设置抓取条数与 `.ru` 回退。
+- `strategies.google_lens_search_type`：`all` / `exact_matches` / `visual_matches` / `products`，默认 `all`；`google_lens_language`、`google_lens_country` 控制语言与地区；`google_lens_auto_crop` 默认关闭，减少拼图只查到局部的情况。
 - `network.allow_image_upload`：本地或平台临时图片无法直接给外部引擎时，是否上传到 Catbox 获取公开 URL；隐私敏感场景请关闭。
 - `network.allow_local_file_access`：默认关闭。保持关闭可避免模型利用路径读取并上传服务器本地文件。
 - `display.max_results`：跨引擎融合、去重和排序后的最终展示条数上限；各引擎内部抓取条数由各自策略配置控制。
 
 SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 列表为空，运行时会复用已填写的一侧。
+
+### Dashboard WebUI
+
+`webui.enabled` 控制是否启用工作台与后端接口，修改后重载插件。工作台可以配置选项、查看全部指令和试跑检索；预览图缓存数量与有效期可通过 `preview_cache_max_items`、`preview_ttl_seconds` 调整。
 
 ## 凭据获取
 
@@ -241,7 +296,7 @@ SerpApi Key 可只在任意一个模块填写一次。若另一个模块的 Key 
 - Pixiv、Fanbox、搜索引擎和图床均有自己的服务条款与内容规则；请确保使用场景符合当地法律和平台条款。
 - 默认 Pixiv 配置过滤 R18。不要把 Bot 配置为向不适合的群组或未成年人发送成人内容。
 - 视觉审核只做候选匹配，不保证图片的版权、来源或事实描述；Bot 回复应保留不确定性。
-- 关闭会话图片记录不会影响 `/aa溯` 附图、回复图片或“先发指令后补图”的指令流程。
+- 关闭会话图片记录不会影响 `/识图` 附图、回复图片或“先发指令后补图”的指令流程。
 
 ## 常见问题
 

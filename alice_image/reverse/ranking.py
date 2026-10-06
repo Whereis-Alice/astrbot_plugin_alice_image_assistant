@@ -184,6 +184,7 @@ class _UrlGroup:
     best_item: SearchResultItem
     best_score: float | None = None
     engines: list[str] = field(default_factory=list)
+    evidence: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def best_priority(self) -> int:
@@ -266,6 +267,14 @@ def group_by_url(items: list[SearchResultItem]) -> list[_UrlGroup]:
                 )
 
         engine = (item.source or "").strip()
+        records = item.evidence or [{
+            "title": item.title, "url": item.url, "source": item.source,
+            "source_key": item.source_key, "thumbnail": item.thumbnail,
+            "description": item.description or "",
+        }]
+        for record in records:
+            if record not in group.evidence and len(group.evidence) < 8:
+                group.evidence.append(record)
         if engine and engine not in group.engines:
             group.engines.append(engine)
 
@@ -284,7 +293,10 @@ def _finalize(group: _UrlGroup) -> SearchResultItem:
     score = group.best_score
     if score is not None:
         score = round(min(1.0, score + _consensus_bonus(len(group.engines))), 6)
-    return replace(group.best_item, score=score, matched_by=list(group.engines))
+    return replace(
+        group.best_item, score=score, matched_by=list(group.engines),
+        evidence=list(group.evidence),
+    )
 
 
 def dedupe_by_url(items: list[SearchResultItem]) -> list[SearchResultItem]:
@@ -309,6 +321,7 @@ def dedupe_by_url(items: list[SearchResultItem]) -> list[SearchResultItem]:
             group.first_item,
             score=score if score is not None else group.first_item.score,
             matched_by=list(group.engines),
+            evidence=list(group.evidence),
         )
         if not item.thumbnail and group.best_item.thumbnail:
             item = replace(

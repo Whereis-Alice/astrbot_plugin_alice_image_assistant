@@ -54,7 +54,12 @@ class SessionImages:
         # URL 已存在时，视为最新一次出现并刷新顺序。
         old_image_id = self.url_index.get(url)
         if old_image_id:
-            self._remove_image(old_image_id)
+            info = self.images[old_image_id]
+            info.timestamp = datetime.now()
+            info.message_id = message_id or info.message_id
+            info.sender_id = sender_id or info.sender_id
+            self.images.move_to_end(old_image_id)
+            return info
 
         while len(self.images) >= self.max_images:
             oldest_image_id = next(iter(self.images.keys()))
@@ -158,7 +163,11 @@ class ImageContextManager:
         Returns:
             会话标识
         """
-        # 尝试获取会话 ID
+        # unified_msg_origin 包含适配器实例，避免不同 Bot 中同号群串图。
+        origin = getattr(event, "unified_msg_origin", None)
+        if isinstance(origin, str) and origin:
+            return origin
+        # 兼容旧事件 / 测试事件。
         session_id = getattr(event, "session_id", None)
         if session_id:
             return str(session_id)
@@ -183,7 +192,7 @@ class ImageContextManager:
                 f"[AliceImageContext] 会话缓存达到上限，已回收最旧会话: {evicted_key}"
             )
 
-    def _get_session(self, event: Any) -> SessionImages:
+    def _get_session(self, event: Any, *, create: bool = False) -> SessionImages:
         """获取会话存储。
 
         Args:
@@ -199,6 +208,8 @@ class ImageContextManager:
         existing = self._sessions.pop(session_key, None)
         if existing is None:
             existing = SessionImages(max_images=self.max_images_per_session)
+            if not create:
+                return existing
         # 访问即刷新 LRU 顺序
         self._sessions[session_key] = existing
         self._evict_stale_sessions_if_needed()
@@ -227,7 +238,7 @@ class ImageContextManager:
             sender_id: 发送者 ID
         """
         with self._lock:
-            session = self._get_session(event)
+            session = self._get_session(event, create=True)
             info = session.add_image(url, message_id, sender_id)
             if info:
                 logger.debug(

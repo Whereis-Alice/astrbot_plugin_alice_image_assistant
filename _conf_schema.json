@@ -254,7 +254,7 @@
               "artist_random_blocked_tags": {
                 "type": "list",
                 "description": "画师随机作品屏蔽标签",
-                "hint": "仅作用于 /aaP画师随。精确匹配 Pixiv 原始标签或翻译标签，不区分大小写。",
+                "hint": "仅作用于 /随机插画。精确匹配 Pixiv 原始标签或翻译标签，不区分大小写。",
                 "default": []
               },
               "artist_random_pages": {
@@ -344,7 +344,7 @@
     "hint": "支持 SauceNAO、Google Lens、Ascii2d、Yandex，保留附图、回复图和等待下一张图的指令交互。",
     "items": {
       "enabled": {"type": "bool", "description": "启用以图搜图模块", "default": true},
-      "commands_enabled": {"type": "bool", "description": "启用 /aa溯 指令", "default": true},
+      "commands_enabled": {"type": "bool", "description": "启用 /识图 指令", "default": true},
       "llm_tools_enabled": {"type": "bool", "description": "启用以图搜图 LLM 工具", "default": true},
       "inject_tool_guidance_enabled": {"type": "bool", "description": "向模型注入以图搜图工具提示", "default": true},
       "list_images_tool_enabled": {"type": "bool", "description": "启用会话图片列表工具", "default": true},
@@ -359,7 +359,11 @@
           "image_context_ttl_seconds": {"type": "int", "description": "图片上下文有效秒数；0 不过期", "default": 0},
           "max_image_context_sessions": {"type": "int", "description": "最大图片会话数", "default": 200},
           "include_image_url_in_context": {"type": "bool", "description": "向模型显示原始图片 URL", "default": true},
-          "llm_tool_silent_mode": {"type": "bool", "description": "工具只返回结果，不自动发结果消息", "default": false}
+          "llm_tool_send_results_default": {"type": "bool", "description": "LLM 未传发送参数时自动发送结果卡片", "hint": "默认关闭：自主识图只返回内部证据。工具显式 send_results=true/false 优先；手动 /识图 始终正常发送。替代旧 llm_tool_silent_mode，升级默认静默。", "default": false},
+          "llm_evidence_max_results": {"type": "int", "description": "返回给模型的证据条数", "hint": "独立于聊天展示条数，优先保留各引擎前两条线索，减少有效结果被挤掉。", "default": 12, "slider": {"min": 4, "max": 30, "step": 1}},
+          "visual_evidence_enabled": {"type": "bool", "description": "静默核对原图和候选缩略图", "hint": "调用一次视觉模型比较图片对应关系，避免被无关网页标题误导。失败时保留文本线索并标为未核验，不向聊天发图。", "default": true},
+          "visual_evidence_provider_id": {"type": "string", "description": "证据核对视觉模型", "hint": "留空使用当前会话模型，需支持图片输入。", "default": "", "_special": "select_provider"},
+          "visual_evidence_max_images": {"type": "int", "description": "最多核对的候选图片数", "default": 6, "slider": {"min": 1, "max": 10, "step": 1}}
         }
       },
       "command": {
@@ -399,7 +403,11 @@
           "saucenao_similarity_threshold": {"type": "int", "description": "SauceNAO 最低相似度", "hint": "低于该相似度的结果直接丢弃；60 是精准与召回的平衡点，调太低会引入大量误配。", "default": 60, "slider": {"min": 0, "max": 100, "step": 5}},
           "saucenao_numres": {"type": "int", "description": "SauceNAO 单次请求返回条数", "hint": "范围 1–30。抓多一点更容易凑够高相似度结果，但会更快消耗每日额度。", "default": 5, "slider": {"min": 1, "max": 30, "step": 1}},
           "enable_google_lens": {"type": "bool", "description": "启用 Google Lens", "default": true},
-          "google_lens_max_results": {"type": "int", "description": "Google Lens 取用的视觉匹配条数", "hint": "范围 1–30。Google Lens 不给相似度，插件按返回位次折算分数。", "default": 8, "slider": {"min": 1, "max": 30, "step": 1}},
+          "google_lens_max_results": {"type": "int", "description": "Google Lens 取用的匹配条数", "hint": "范围 1–30。分数仅用于排序，不是识别正确率。", "default": 8, "slider": {"min": 1, "max": 30, "step": 1}},
+          "google_lens_search_type": {"type": "string", "description": "Google Lens 搜索类型", "default": "all", "options": ["all", "exact_matches", "visual_matches", "products"], "hint": "找出处可选 exact_matches；找相似图可选 visual_matches。all 保留 API 返回的同图和视觉匹配线索。"},
+          "google_lens_language": {"type": "string", "description": "Google Lens 结果语言", "default": "zh-cn"},
+          "google_lens_country": {"type": "string", "description": "Google Lens 搜索地区", "hint": "留空由 Google 决定，或填写 us、jp 等地区代码。", "default": ""},
+          "google_lens_auto_crop": {"type": "bool", "description": "Google Lens 自动裁剪主体", "hint": "拼图建议关闭，避免只检索其中一个区域。", "default": false},
           "enable_ascii2d": {"type": "bool", "description": "启用 Ascii2d", "default": true},
           "ascii2d_max_results": {"type": "int", "description": "Ascii2d 单次返回条数", "hint": "范围 1–20。bovw（特征）与 color（颜色）两种模式的结果会先按链接去重再截断。", "default": 5, "slider": {"min": 1, "max": 20, "step": 1}},
           "enable_yandex": {"type": "bool", "description": "启用 Yandex", "hint": "无需 API Key；公开页面可能受地区或 CAPTCHA 影响。", "default": true},

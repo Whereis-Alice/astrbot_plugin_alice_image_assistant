@@ -607,7 +607,7 @@ class ControllerConfigRobustnessTests(unittest.IsolatedAsyncioTestCase):
 
         alias_event = SimpleNamespace(
             is_at_or_wake_command=True,
-            message_str="aa溯图 google",
+            message_str="识图图 google",
         )
         self.assertFalse(AliceReverseController._is_search_command_event(alias_event))
 
@@ -615,12 +615,33 @@ class ControllerConfigRobustnessTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             controller_module,
             "REVERSE_SEARCH_COMMAND_NAMES",
-            (REVERSE_SEARCH_COMMAND, "aa溯图"),
+            (REVERSE_SEARCH_COMMAND, "识图图"),
         ):
             self.assertTrue(AliceReverseController._is_search_command_event(alias_event))
 
 
 class ControllerImageIdTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_image_selection_does_not_guess_latest(self) -> None:
+        controller = AliceReverseController(
+            Mock(),
+            {
+                "strategies": {
+                    "enable_saucenao": False,
+                    "enable_google_lens": False,
+                    "enable_ascii2d": False,
+                    "enable_yandex": False,
+                }
+            },
+        )
+        controller.strategies.append(_NoopStrategy())  # type: ignore[arg-type]
+        try:
+            payload = json.loads(await controller.tool_search_image(_event()))
+        finally:
+            await controller.terminate()
+
+        self.assertFalse(payload["success"])
+        self.assertIn("明确指定 image_id 或 image_index", payload["error"])
+
     async def test_unknown_image_id_returns_error_instead_of_latest_image(self) -> None:
         controller = AliceReverseController(
             Mock(),

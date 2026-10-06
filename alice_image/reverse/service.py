@@ -127,7 +127,7 @@ class AliceImageReverseService:
             image_url: 图片 URL
 
         Returns:
-            该策略的结果列表，超时或异常时返回空列表
+            该策略的结果列表；异常交给聚合层区分失败与零匹配
         """
         name = strategy.get_service_name()
         try:
@@ -139,24 +139,30 @@ class AliceImageReverseService:
                 f"[AliceImageReverse] 策略 [{name}] 超过 "
                 f"{self.total_timeout_seconds}s 总超时，已放弃该引擎结果"
             )
-            return []
+            raise
         except Exception as e:
-            logger.error(f"[AliceImageReverse] 策略 [{name}] 执行失败: {e}")
-            return []
+            logger.error(f"[AliceImageReverse] 策略 [{name}] 执行失败: {type(e).__name__}")
+            raise
 
         if not isinstance(items, list):
             logger.warning(f"[AliceImageReverse] 策略 [{name}] 返回了非列表结果，已忽略")
-            return []
-        return items[: self.per_engine_fetch]
+            raise TypeError("搜索策略返回值必须为列表")
+        # 引擎自身已有抓取上限。不要再用聊天展示上限提前裁掉给模型的线索。
+        return items[:30]
 
     async def explore(
-        self, image_url: str, strategy_names: list[str] | None = None
+        self,
+        image_url: str,
+        strategy_names: list[str] | None = None,
+        *,
+        download_thumbnails: bool = True,
     ) -> ExplorationResult:
         """执行图片搜索.
 
         Args:
             image_url: 图片 URL 地址
             strategy_names: 指定使用的策略名称列表，None 表示使用所有策略
+            download_thumbnails: 是否下载缩略图；LLM 静默识图时可关闭以减少网络请求和内存占用
 
         Returns:
             包含融合排序后结果的 ExplorationResult
@@ -182,7 +188,7 @@ class AliceImageReverseService:
         if not_found:
             logger.warning(f"[AliceImageReverse] 以下策略未找到: {not_found}")
         logger.info(
-            f"[AliceImageReverse] 开始搜图，目标 URL: {image_url}, 使用策略: {strategy_names_str}"
+            f"[AliceImageReverse] 开始搜图，使用策略: {strategy_names_str}"
         )
 
         try:
@@ -197,33 +203,45 @@ class AliceImageReverseService:
 
             # 聚合结果
             all_items: list[SearchResultItem] = []
+            failed_strategies: list[str] = []
             for index, result in enumerate(results_list):
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
                 if isinstance(result, BaseException):
+                    failed_strategies.append(strategies_to_use[index].get_service_name())
                     logger.error(
                         f"[AliceImageReverse] 策略 "
-                        f"[{strategies_to_use[index].get_service_name()}] 异常: {result}"
+                        f"[{strategies_to_use[index].get_service_name()}] 异常: {type(result).__name__}"
                     )
                     continue
                 all_items.extend(result)
 
             # 先跨引擎融合排序去重，再按展示上限截断，保证高置信度结果不被挤掉
-            items = merge_and_rank(all_items, self.max_results)
+            evidence_items = merge_and_rank(all_items, 0)
+            items = evidence_items[: self.max_results]
             logger.info(
                 f"[AliceImageReverse] 搜索完成，原始 {len(all_items)} 条 -> "
-                f"融合后 {len(items)} 条，开始下载缩略图..."
+                f"融合后 {len(items)} 条"
+                + ("，开始下载缩略图..." if download_thumbnails else "，跳过缩略图下载")
             )
 
-            # 并行下载缩略图 (只下载最终要展示的那几条)
-            await self._fill_thumbnails(items)
+            # 只有需要把结果图片发到聊天时才下载缩略图。
+            if download_thumbnails:
+                await self._fill_thumbnails(items)
 
             elapsed = time.monotonic() - start_time
             logger.info(f"[AliceImageReverse] 任务结束，总耗时: {elapsed:.2f}s")
 
-            return ExplorationResult(items=items)
+            return ExplorationResult(
+                items=items, evidence_items=evidence_items,
+                attempted_strategies=[s.get_service_name() for s in strategies_to_use],
+                failed_strategies=failed_strategies,
+            )
 
         except Exception as e:
-            logger.error(f"[AliceImageReverse] 搜索主流程异常: {e}")
-            return ExplorationResult()
+            logger.error(f"[AliceImageReverse] 搜索主流程异常: {type(e).__name__}")
+            names = [s.get_service_name() for s in strategies_to_use]
+            return ExplorationResult(attempted_strategies=names, failed_strategies=names)
 
     def _get_thumbnail_fetcher(
         self, item: SearchResultItem

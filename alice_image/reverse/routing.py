@@ -48,19 +48,25 @@ class IntentRoute:
 # 例如没有 SauceNAO 时，“出处”仍会回退到 Ascii2d / Google Lens。
 _PROFILES: tuple[_IntentProfile, ...] = (
     _IntentProfile(
+        key="photo", label="现实照片 / 画面查证",
+        priorities=("googlelens", "yandex", "saucenao", "ascii2d"),
+        keywords=(
+            ("真人", 20), ("照片", 15), ("截图", 15), ("同一个人", 25),
+            ("这两位", 20), ("人物是谁", 18), ("人物", 12), ("是谁", 8),
+            ("识图", 8), ("识别", 8), ("视频", 15), ("photo", 15),
+            ("who is", 8), ("screenshot", 15),
+        ),
+    ),
+    _IntentProfile(
         key="character",
         label="角色 / 人物",
         priorities=("saucenao", "ascii2d", "yandex", "googlelens"),
         keywords=(
             ("哪个角色", 14),
             ("角色是谁", 14),
-            ("人物是谁", 14),
             ("角色", 10),
-            ("人物", 10),
-            ("是谁", 8),
             ("cos", 7),
             ("character", 10),
-            ("who is", 8),
         ),
     ),
     _IntentProfile(

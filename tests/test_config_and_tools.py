@@ -164,11 +164,11 @@ class ConfigAndToolTests(unittest.TestCase):
         self.assertIn("pixiv_user_id", find_properties)
         reverse_properties = tools[3].parameters["properties"]
         self.assertIn("intent", reverse_properties)
+        self.assertEqual(reverse_properties["send_results"]["type"], "boolean")
 
     def test_no_upstream_public_command_or_tool_identifiers_remain(self) -> None:
         source = (PLUGIN_ROOT / "main.py").read_text("utf-8")
-        self.assertNotRegex(source, r'@filter\.command\("搜图"')
-        self.assertNotRegex(source, r'@filter\.command\("pixiv')
+        self.assertNotRegex(source, r'@filter\.command\("(?:aa|pixiv)')
         for forbidden in (
             'name: str = "search_image_tool"',
             'name: str = "pixiv_search_illust"',
@@ -178,7 +178,18 @@ class ConfigAndToolTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         command_names = re.findall(r'@filter\.command\("([^"]+)"', source)
         self.assertEqual(len(command_names), len(set(command_names)))
-        self.assertTrue(all(name.startswith("aa") for name in command_names))
+        self.assertEqual(len(command_names), 48)
+        self.assertTrue(
+            {
+                "图片帮助",
+                "找图",
+                "识图",
+                "插画",
+                "画师作品",
+                "随机插画",
+            }.issubset(command_names)
+        )
+        self.assertFalse(any(name.startswith("aa") for name in command_names))
         self.assertNotIn('@filter.command("爱图', source)
         self.assertNotIn('alias=["alice-', source)
 
@@ -198,8 +209,8 @@ class ConfigAndToolTests(unittest.TestCase):
         )
         replaced = replace_public_command_names(message)
 
-        self.assertIn("`/aaP 初音ミク`", replaced)
-        self.assertIn("`/aaP画师 米山舞`", replaced)
+        self.assertIn("`/插画 初音ミク`", replaced)
+        self.assertIn("`/画师 米山舞`", replaced)
         self.assertIn("/project/pixivpy3/", replaced)
 
 

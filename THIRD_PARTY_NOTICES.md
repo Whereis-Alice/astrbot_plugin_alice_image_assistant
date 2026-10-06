@@ -7,7 +7,9 @@
 | [vmoranv-reborn/astrbot_plugin_pixiv_reborn](https://github.com/vmoranv-reborn/astrbot_plugin_pixiv_reborn) | vmoranv-reborn 及贡献者 | `12423b84142bb5c994ea68bfdd2eaee20d3a2528` | AGPL-3.0 | Pixiv 客户端、插画/小说/用户/Fanbox/订阅/随机搜索处理、过滤和发送工具 |
 | [674537331/astrbot_plugin_soutushenqi](https://github.com/674537331/astrbot_plugin_soutushenqi) | RyanVaderAN 及贡献者 | `dd99dfa9166bd5714c9ea04db85136c537a338b2` | GPL-3.0 | 搜图神器抓取、Bing 补充、候选下载/去重/拼图与视觉挑图 |
 | [monbed/astrbot_plugin_serpapi_imgsearch](https://github.com/monbed/astrbot_plugin_serpapi_imgsearch) | monbed 及贡献者 | `37d892200add8dda105488022db79632e5b2b7ca` | AGPL-3.0 | 仅文字搜图：SerpApi 多 Key 客户端、Google Images 候选、拼图与 VLM 淘汰赛 |
-| [iona-s/astrbot_plugin_imgexploration](https://github.com/iona-s/astrbot_plugin_imgexploration) | FlanChanXwO、iona-s 及贡献者 | `49e79e6bcdf2b790260f08823264718642c4de03` | AGPL-3.0 | 完整以图搜图：SauceNAO、Google Lens、Ascii2d、会话图片上下文、等待/回复图片交互和降级输出 |
+| [iona-s/astrbot_plugin_imgexploration](https://github.com/iona-s/astrbot_plugin_imgexploration) | FlanChanXwO、iona-s 及贡献者 | 初始整合 `49e79e6bcdf2b790260f08823264718642c4de03`；v2.0.0 追加参考 `9ba9e3e8e19ca4cb69ae5418f65b118a861e83fa` | AGPL-3.0 | 完整以图搜图；追加借鉴明确选图、静默工具输出、Lens 搜索类型/裁剪/语言/地区、429 换 Key、脏项补位与引擎失败区分 |
+
+v2.0.0 在本插件现有架构中实现独立的模型证据池、候选视觉核对和同轮工具缓存，继续允许模型为图片问题自主检索。没有采用上游要求用户明确提出反搜后才能调用工具的策略。
 
 Yandex 策略的页面入口、Cookie 可选和 `.com -> .ru` 回退思路参考了
 [OMSociety/astrbot_plugin_reverse_searcher](https://github.com/OMSociety/astrbot_plugin_reverse_searcher)。
